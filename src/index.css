@@ -1,0 +1,43 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --bg-emerald-black: #03120E;
+    --bg-dark-emerald: #06271D;
+    --accent-emerald: #00B887;
+    --accent-gold: #F4C95D;
+    --accent-gold-light: #F8D978;
+    --accent-gold-dark: #E6A92D;
+    --text-primary: #FFFFFF;
+    --text-secondary: #B7C8C1;
+    --input-bg: #0B211B;
+    --input-border: #24473A;
+    --color-error: #FF6B6B;
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+
+  body {
+    background-color: #03120E;
+    color: #FFFFFF;
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+/* Custom scrollbar for android feeling */
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 184, 135, 0.2);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 184, 135, 0.4);
+}

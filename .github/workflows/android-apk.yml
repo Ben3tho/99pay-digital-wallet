@@ -1,0 +1,127 @@
+name: Build 99Pay Android APK
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'APK build type'
+        required: true
+        default: 'both'
+        type: choice
+        options:
+          - debug
+          - release
+          - both
+
+jobs:
+  build-android-apk:
+    name: Build Android Debug & Release APKs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Set up Java 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install dependencies & verify TypeScript + Vite build
+        run: |
+          npm install
+          npm run lint
+          npm run build
+
+      - name: Sync Web Bundle into Capacitor Android
+        run: npx cap sync android
+
+      - name: Grant execute permission to Gradle wrapper
+        run: chmod +x android/gradlew
+
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('android/**/*.gradle*', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Build Debug APK
+        if: ${{ inputs.build_type != 'release' }}
+        env:
+          APP_VERSION_CODE: ${{ vars.APP_VERSION_CODE || github.run_number }}
+          APP_VERSION_NAME: ${{ vars.APP_VERSION_NAME || '2.4.0' }}
+        run: |
+          cd android
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Upload Debug APK Artifact
+        if: ${{ inputs.build_type != 'release' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: 99pay-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: Check Release Signing Secrets
+        id: signing_check
+        if: ${{ inputs.build_type != 'debug' }}
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ] && [ -n "$KEYSTORE_PASS" ] && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASS" ]; then
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+            echo "$KEYSTORE_B64" | base64 --decode > android/app/release-keystore.jks
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Release keystore secrets (ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD) are not configured. Building unsigned release APK."
+          fi
+
+      - name: Build Release APK
+        if: ${{ inputs.build_type != 'debug' }}
+        env:
+          APP_VERSION_CODE: ${{ vars.APP_VERSION_CODE || github.run_number }}
+          APP_VERSION_NAME: ${{ vars.APP_VERSION_NAME || '2.4.0' }}
+          ANDROID_KEYSTORE_PATH: ${{ steps.signing_check.outputs.signed == 'true' && 'release-keystore.jks' || '' }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          cd android
+          ./gradlew assembleRelease --no-daemon
+
+      - name: Cleanup Temporary Keystore
+        if: always() && steps.signing_check.outputs.signed == 'true'
+        run: rm -f android/app/release-keystore.jks
+
+      - name: Upload Release APK Artifact
+        if: ${{ inputs.build_type != 'debug' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: 99pay-release-apk
+          path: android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error

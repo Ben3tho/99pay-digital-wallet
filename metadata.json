@@ -1,0 +1,6 @@
+{
+  "name": "99Pay Digital Wallet",
+  "description": "Secure digital wallet for Tanzanian users to organize bank cards, mobile money, insurance, and IDs. Phase 2: Premium Sign In & Registration UI.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
