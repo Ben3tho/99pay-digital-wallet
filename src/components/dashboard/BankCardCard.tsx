@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { Wifi, Eye, EyeOff, Copy, Check } from 'lucide-react';
 import { BankCardItem } from '../../data/walletData';
 import { CardBrandLogo } from './CardBrandLogo';
+import { getExpiryStatus } from '../../utils/expiryAlerts';
+import { isEncryptedEnvelope } from '../../utils/vaultSecurity';
 
 interface BankCardCardProps {
   card: BankCardItem;
@@ -112,9 +114,12 @@ export const BankCardCard: React.FC<BankCardCardProps> = ({
           .toUpperCase()
       : theme.logoText;
 
+  const expiryInfo = getExpiryStatus(card.expiryDate, 45);
+  const canShowFull = isRevealed && Boolean(card.fullNumber) && !isEncryptedEnvelope(card.fullNumber);
+
   const handleCopy = (e: React.MouseEvent) => {
     e.stopPropagation();
-    const textToCopy = isRevealed && card.fullNumber ? card.fullNumber : card.maskedNumber;
+    const textToCopy = canShowFull && card.fullNumber ? card.fullNumber : card.maskedNumber;
     navigator.clipboard?.writeText(textToCopy);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -250,9 +255,9 @@ export const BankCardCard: React.FC<BankCardCardProps> = ({
         {/* Embossed Card Number Display */}
         <div className="font-mono text-base sm:text-lg font-bold tracking-[0.18em] text-white/95 drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] flex items-center justify-between gap-2">
           <span className="truncate">
-            {isRevealed && card.fullNumber ? card.fullNumber : card.maskedNumber}
+            {canShowFull && card.fullNumber ? card.fullNumber : card.maskedNumber}
           </span>
-          {isRevealed && (
+          {canShowFull && (
             <span className="text-[10px] font-bold tracking-normal text-[#00B887] bg-[#00B887]/20 px-2 py-0.5 rounded-md border border-[#00B887]/50 shrink-0">
               PIN Verified
             </span>
@@ -284,9 +289,30 @@ export const BankCardCard: React.FC<BankCardCardProps> = ({
             <span className="text-[9px] text-[#B7C8C1] uppercase tracking-wider block font-semibold">
               Expires
             </span>
-            <span className="font-mono font-bold text-white tracking-widest text-xs">
-              {card.expiryDate}
-            </span>
+            <div className="flex items-center justify-end gap-1">
+              <span
+                className={`font-mono font-bold tracking-widest text-xs ${
+                  expiryInfo?.status === 'expired'
+                    ? 'text-rose-300'
+                    : expiryInfo?.status === 'expiring_soon'
+                    ? 'text-amber-300'
+                    : 'text-white'
+                }`}
+              >
+                {card.expiryDate}
+              </span>
+              {expiryInfo && expiryInfo.status !== 'valid' && (
+                <span
+                  className={`text-[8px] font-extrabold uppercase px-1 py-0.5 rounded ${
+                    expiryInfo.status === 'expired'
+                      ? 'bg-rose-500/30 text-rose-200 border border-rose-400/50'
+                      : 'bg-amber-500/30 text-amber-200 border border-amber-400/50'
+                  }`}
+                >
+                  {expiryInfo.status === 'expired' ? 'EXP' : 'SOON'}
+                </span>
+              )}
+            </div>
           </div>
         </div>
       </div>

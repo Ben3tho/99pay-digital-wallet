@@ -1,0 +1,102 @@
+{
+  "entities": {
+    "UserProfileDoc": {
+      "title": "UserProfileDoc",
+      "description": "Private profile metadata for a 99Pay wallet owner.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the profile owner.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "fullName": {
+          "type": "string",
+          "description": "Display name of the wallet owner.",
+          "minLength": 0,
+          "maxLength": 120
+        },
+        "phoneNumber": {
+          "type": "string",
+          "description": "Phone number for local mobile money linking.",
+          "minLength": 0,
+          "maxLength": 32
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "Account email address.",
+          "minLength": 0,
+          "maxLength": 160
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when profile was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when profile was last updated."
+        }
+      },
+      "required": ["ownerId", "fullName", "createdAt", "updatedAt"]
+    },
+    "EncryptedVaultDoc": {
+      "title": "EncryptedVaultDoc",
+      "description": "Client-side AES-256-GCM encrypted 99Pay wallet backup blob.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the vault owner.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "vaultFormat": {
+          "type": "string",
+          "description": "Ciphertext envelope format identifier.",
+          "enum": ["99PAY_CLOUD_AESGCM_V1"]
+        },
+        "ciphertext": {
+          "type": "string",
+          "description": "Base64 AES-256-GCM encrypted wallet JSON payload.",
+          "minLength": 16,
+          "maxLength": 750000
+        },
+        "itemCount": {
+          "type": "integer",
+          "description": "Total number of encrypted items inside the backup."
+        },
+        "hasPinWrap": {
+          "type": "boolean",
+          "description": "Whether ciphertext key uses user passphrase/PIN derivation."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when vault sync record was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when vault sync record was updated."
+        }
+      },
+      "required": ["ownerId", "vaultFormat", "ciphertext", "itemCount", "hasPinWrap", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfileDoc" },
+      "description": "Private user profile document keyed by Firebase Auth UID."
+    },
+    "/users/{userId}/vault/{vaultId}": {
+      "schema": { "$ref": "#/entities/EncryptedVaultDoc" },
+      "description": "Client-side encrypted wallet sync document belonging to the user."
+    }
+  }
+}

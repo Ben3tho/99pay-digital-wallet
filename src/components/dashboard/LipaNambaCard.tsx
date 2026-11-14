@@ -12,10 +12,12 @@ import {
   UtensilsCrossed,
   Tag,
   Star,
-  ExternalLink,
+  Trash2,
+  Pencil,
 } from 'lucide-react';
 import { LipaMerchantItem } from '../../data/walletData';
 import { Language, TRANSLATIONS } from '../../i18n/translations';
+import { launchUssdDialer } from '../../utils/ussd';
 
 interface LipaNambaCardProps {
   item: LipaMerchantItem;
@@ -23,6 +25,8 @@ interface LipaNambaCardProps {
   onOpenQr: (item: LipaMerchantItem) => void;
   onCopy: (text: string, label: string) => void;
   onToggleFavorite?: (id: string) => void;
+  onEdit?: (item: LipaMerchantItem) => void;
+  onDelete?: (id: string) => void;
 }
 
 export const LipaNambaCard: React.FC<LipaNambaCardProps> = ({
@@ -31,6 +35,8 @@ export const LipaNambaCard: React.FC<LipaNambaCardProps> = ({
   onOpenQr,
   onCopy,
   onToggleFavorite,
+  onEdit,
+  onDelete,
 }) => {
   const t = TRANSLATIONS[lang];
   const [copied, setCopied] = useState(false);
@@ -81,15 +87,12 @@ export const LipaNambaCard: React.FC<LipaNambaCardProps> = ({
   const handleDialUssd = () => {
     let code = item.ussdPrefix;
     if (dialAmount && !isNaN(parseInt(dialAmount, 10))) {
-      // If user specified amount, embed into standard provider USSD format where applicable
       if (item.provider === 'Vodacom M-Pesa') {
         code = `*150*00*1*${item.number}*${dialAmount}#`;
       }
     }
-    // Encodes hash for standard tel: protocol: %23
-    const encodedUssd = `tel:${code.replace(/#/g, '%23')}`;
-    onCopy(code, `USSD Code: ${code}`);
-    window.location.href = encodedUssd;
+    const launched = launchUssdDialer(code);
+    onCopy(launched || code, `USSD Code: ${launched || code}`);
     setIsDialingModalOpen(false);
   };
 
@@ -118,19 +121,44 @@ export const LipaNambaCard: React.FC<LipaNambaCardProps> = ({
           </div>
         </div>
 
-        {onToggleFavorite && (
-          <button
-            type="button"
-            onClick={() => onToggleFavorite(item.id)}
-            className="text-[#B7C8C1] hover:text-[#F4C95D] transition-colors p-1"
-          >
-            <Star
-              className={`w-4 h-4 ${
-                item.favorite ? 'fill-[#F4C95D] text-[#F4C95D]' : 'opacity-40'
-              }`}
-            />
-          </button>
-        )}
+        <div className="flex items-center gap-1 shrink-0">
+          {onToggleFavorite && (
+            <button
+              type="button"
+              onClick={() => onToggleFavorite(item.id)}
+              aria-label="Toggle favorite merchant"
+              className="text-[#B7C8C1] hover:text-[#F4C95D] transition-colors p-1 cursor-pointer"
+            >
+              <Star
+                className={`w-4 h-4 ${
+                  item.favorite ? 'fill-[#F4C95D] text-[#F4C95D]' : 'opacity-40'
+                }`}
+              />
+            </button>
+          )}
+          {onEdit && (
+            <button
+              type="button"
+              onClick={() => onEdit(item)}
+              aria-label="Edit merchant till"
+              className="text-[#B7C8C1] hover:text-[#00B887] transition-colors p-1 cursor-pointer"
+              title={lang === 'sw' ? 'Hariri Lipa Namba' : 'Edit Till'}
+            >
+              <Pencil className="w-3.5 h-3.5" />
+            </button>
+          )}
+          {onDelete && (
+            <button
+              type="button"
+              onClick={() => onDelete(item.id)}
+              aria-label="Delete merchant till"
+              className="text-[#B7C8C1] hover:text-rose-400 transition-colors p-1 cursor-pointer"
+              title={lang === 'sw' ? 'Futa Lipa Namba' : 'Delete Till'}
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          )}
+        </div>
       </div>
 
       {item.branchOrNotes && (

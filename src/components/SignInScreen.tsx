@@ -9,7 +9,11 @@ import { SignInButton } from './SignInButton';
 import { BiometricSignInOption } from './BiometricSignInOption';
 import { CreateAccountFooter } from './CreateAccountFooter';
 import { PhaseInfoModal, ModalType } from './PhaseInfoModal';
-import { Shield, CheckCircle2 } from 'lucide-react';
+import { Shield, CheckCircle2, AlertCircle } from 'lucide-react';
+import { signInWithEmailAndPassword, signInWithPopup } from 'firebase/auth';
+import { auth, googleProvider } from '../lib/firebase';
+import { syncUserProfileToCloud } from '../services/cloudVaultService';
+import { verifyDeviceBiometric } from '../utils/biometrics';
 
 interface SignInScreenProps {
   onOpenCodeInspector?: () => void;
@@ -32,13 +36,15 @@ export const SignInScreen: React.FC<SignInScreenProps> = ({
   const [identifierError, setIdentifierError] = useState<string | null>(null);
   const [passwordError, setPasswordError] = useState<string | null>(null);
 
-  // Development stage banner / validation state
+  // Development stage banner / auth feedback state
   const [devInfoNotice, setDevInfoNotice] = useState<string | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Modal State
   const [activeModal, setActiveModal] = useState<ModalType>(null);
 
-  const handleSignIn = () => {
+  const handleSignIn = async () => {
     let hasError = false;
     const trimmedId = identifier.trim();
 
@@ -58,14 +64,109 @@ export const SignInScreen: React.FC<SignInScreenProps> = ({
 
     if (hasError) {
       setDevInfoNotice(null);
+      setAuthError(null);
       return;
     }
 
-    // Validation passed: display Phase 1 requirement message (no fake auth, no dashboard navigation)
-    setDevInfoNotice(
-      'Phase 1 Preview: Inputs validated successfully. Secure authentication repository and backend token issuance will be connected in a later development phase.'
+    setAuthError(null);
+    setDevInfoNotice(null);
+
+    const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedId);
+    if (!isEmail) {
+      setDevInfoNotice(
+        'Phone sign-in uses local offline vault access. To enable cloud backup & sync, sign in with Google or an email address.'
+      );
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const cred = await signInWithEmailAndPassword(auth, trimmedId, password);
+      await syncUserProfileToCloud(cred.user, {
+        fullName: cred.user.displayName || '',
+        email: cred.user.email || trimmedId,
+      });
+      if (onNavigateToDashboard) {
+        onNavigateToDashboard();
+      } else {
+        setDevInfoNotice(`Signed in as ${cred.user.email}`);
+      }
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code || '';
+      if (code === 'auth/operation-not-allowed') {
+        setAuthError(
+          'Email/Password sign-in is disabled in Firebase Console. Use Google Sign-In below or open your Local Vault.'
+        );
+      } else if (
+        code === 'auth/invalid-credential' ||
+        code === 'auth/wrong-password' ||
+        code === 'auth/user-not-found'
+      ) {
+        setAuthError('Incorrect email or password. Please verify and try again.');
+      } else {
+        setAuthError(err instanceof Error ? err.message : 'Unable to sign in right now.');
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    setAuthError(null);
+    setDevInfoNotice(null);
+    setIsSubmitting(true);
+    try {
+      const cred = await signInWithPopup(auth, googleProvider);
+      try {
+        const existingRaw = window.localStorage.getItem('99pay_vault_state_v1');
+        const existing = existingRaw ? JSON.parse(existingRaw) : {};
+        const currentProfile = existing.userProfile || {};
+        window.localStorage.setItem(
+          '99pay_vault_state_v1',
+          JSON.stringify({
+            ...existing,
+            userProfile: {
+              ...currentProfile,
+              fullName: currentProfile.fullName || cred.user.displayName || '',
+              email: cred.user.email || currentProfile.email || '',
+            },
+          })
+        );
+      } catch {
+        // ignore storage errors
+      }
+      await syncUserProfileToCloud(cred.user, {
+        fullName: cred.user.displayName || '',
+        email: cred.user.email || '',
+      });
+      if (onNavigateToDashboard) {
+        onNavigateToDashboard();
+      }
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code || '';
+      if (code !== 'auth/popup-closed-by-user') {
+        setAuthError(
+          err instanceof Error ? err.message : 'Google Sign-In failed. Please try again.'
+        );
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleBiometricSignIn = async () => {
+    setAuthError(null);
+    const res = await verifyDeviceBiometric(
+      '99Pay Vault',
+      'Verify your device biometric to open your 99Pay Vault'
     );
-    setActiveModal('signin_validated');
+    if (res.verified) {
+      if (onNavigateToDashboard) onNavigateToDashboard();
+    } else if (res.reason === 'NOT_ENROLLED') {
+      setActiveModal('biometric');
+    } else {
+      setAuthError('Biometric verification failed. Please sign in with Google or email.');
+    }
   };
 
   return (
@@ -166,20 +267,53 @@ export const SignInScreen: React.FC<SignInScreenProps> = ({
               />
 
               {/* SECTION G: PRIMARY SIGN IN BUTTON */}
-              <div className="pt-1 sm:pt-1.5">
-                <SignInButton onClick={handleSignIn} />
+              <div className="pt-1 sm:pt-1.5 space-y-2.5">
+                <SignInButton onClick={handleSignIn} isLoading={isSubmitting} />
+
+                <button
+                  type="button"
+                  onClick={handleGoogleSignIn}
+                  disabled={isSubmitting}
+                  className="w-full h-12 rounded-2xl bg-[#06271D] hover:bg-[#0B211B] border border-[#24473A] hover:border-[#00B887]/60 text-white font-semibold text-sm flex items-center justify-center gap-2.5 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      fill="#EA4335"
+                      d="M12 10.2v3.9h5.5c-.2 1.3-1.5 3.9-5.5 3.9-3.3 0-6-2.7-6-6s2.7-6 6-6c1.9 0 3.1.8 3.9 1.5l2.7-2.6C16.9 3.3 14.7 2.4 12 2.4 6.7 2.4 2.4 6.7 2.4 12s4.3 9.6 9.6 9.6c5.5 0 9.2-3.9 9.2-9.4 0-.6-.1-1.1-.2-2H12z"
+                    />
+                  </svg>
+                  <span>Continue with Google</span>
+                </button>
               </div>
 
-              {/* Status Notice Banner (Strict Real Implementation Policy) */}
+              {authError && (
+                <div className="p-3 rounded-xl bg-rose-950/40 border border-rose-700/50 flex items-start gap-2 text-xs text-rose-200 animate-in fade-in duration-200">
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  <div className="flex-1 space-y-1.5">
+                    <span>{authError}</span>
+                    {onNavigateToDashboard && (
+                      <button
+                        type="button"
+                        onClick={onNavigateToDashboard}
+                        className="block text-[11px] font-bold text-[#F4C95D] hover:underline cursor-pointer"
+                      >
+                        Open Local Device Vault Offline →
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Validation & Local Vault Notice Banner */}
               {devInfoNotice && (
                 <div className="p-3.5 rounded-xl bg-[#06271D] border border-[#F4C95D]/40 flex items-start gap-2.5 text-xs text-[#B7C8C1] animate-in fade-in duration-200">
                   <CheckCircle2 className="w-4 h-4 text-[#00B887] shrink-0 mt-0.5" />
                   <div className="flex-1 space-y-1">
                     <span className="font-bold text-white block">
-                      Local Input Validation: <span className="text-[#00B887]">IMPLEMENTED AND VERIFIED</span>
+                      Local Vault Ready
                     </span>
                     <span className="text-[11px] block text-[#B7C8C1]">
-                      Backend Authentication: <span className="text-[#F4C95D] font-semibold">BLOCKED BY EXTERNAL REQUIREMENT</span> (Requires live authentication provider configuration).
+                      {devInfoNotice}
                     </span>
                     {onNavigateToDashboard && (
                       <button
@@ -194,11 +328,9 @@ export const SignInScreen: React.FC<SignInScreenProps> = ({
                 </div>
               )}
 
-              {/* SECTION H: BIOMETRIC SIGN-IN PREVIEW */}
+              {/* SECTION H: BIOMETRIC SIGN-IN */}
               <div className="pt-2 sm:pt-3">
-                <BiometricSignInOption
-                  onClick={() => setActiveModal('biometric')}
-                />
+                <BiometricSignInOption onClick={handleBiometricSignIn} />
               </div>
             </div>
           </div>

@@ -3,7 +3,9 @@ import { AndroidStatusBar } from './AndroidStatusBar';
 import { AndroidNavigationBar } from './AndroidNavigationBar';
 import { NineNinePayLogo } from './NineNinePayLogo';
 import { SignInInputField } from './SignInInputField';
-import { Shield, ArrowLeft, AlertTriangle, KeyRound, CheckCircle2, ServerOff } from 'lucide-react';
+import { Shield, ArrowLeft, CheckCircle2, AlertCircle } from 'lucide-react';
+import { sendPasswordResetEmail } from 'firebase/auth';
+import { auth } from '../lib/firebase';
 
 interface ForgotPasswordScreenProps {
   onNavigateToSignIn: () => void;
@@ -15,13 +17,14 @@ export const ForgotPasswordScreen: React.FC<ForgotPasswordScreenProps> = ({
   const [identifier, setIdentifier] = useState('');
   const [identifierError, setIdentifierError] = useState<string | null>(null);
   const [submissionStatus, setSubmissionStatus] = useState<
-    'idle' | 'blocked_no_backend' | 'validation_failed'
+    'idle' | 'sent' | 'error' | 'phone_notice' | 'validation_failed'
   >('idle');
+  const [statusMessage, setStatusMessage] = useState('');
+  const [isSending, setIsSending] = useState(false);
 
-  const handleRecover = () => {
+  const handleRecover = async () => {
     const trimmed = identifier.trim();
 
-    // 1. Local Input Validation (IMPLEMENTED AND VERIFIED)
     if (!trimmed) {
       setIdentifierError('Please enter your registered phone number or email');
       setSubmissionStatus('validation_failed');
@@ -39,11 +42,32 @@ export const ForgotPasswordScreen: React.FC<ForgotPasswordScreenProps> = ({
     }
 
     setIdentifierError(null);
+    if (!isEmail) {
+      setStatusMessage(
+        'SMS OTP recovery is not enabled for local-only phone vaults. Enter your registered email address to receive a Firebase password reset link.'
+      );
+      setSubmissionStatus('phone_notice');
+      return;
+    }
 
-    // 2. Real Backend Submission Check (STRICT NO-DEMO POLICY)
-    // External authentication provider (Firebase Auth / SMS Provider) is not yet provisioned.
-    // In accordance with policy, we DO NOT simulate fake delivery or invent fake OTPs.
-    setSubmissionStatus('blocked_no_backend');
+    setIsSending(true);
+    try {
+      await sendPasswordResetEmail(auth, trimmed);
+      setStatusMessage(`Password reset instructions were sent to ${trimmed}. Check your inbox.`);
+      setSubmissionStatus('sent');
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code || '';
+      if (code === 'auth/user-not-found') {
+        setStatusMessage('No cloud account found for that email address.');
+      } else {
+        setStatusMessage(
+          err instanceof Error ? err.message : 'Could not send reset email right now.'
+        );
+      }
+      setSubmissionStatus('error');
+    } finally {
+      setIsSending(false);
+    }
   };
 
   return (
@@ -134,49 +158,30 @@ export const ForgotPasswordScreen: React.FC<ForgotPasswordScreenProps> = ({
                 <button
                   type="button"
                   onClick={handleRecover}
-                  className="relative w-full h-14 rounded-2xl font-bold text-base text-[#03120E] transition-all duration-150 active:scale-[0.985] cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#F4C95D]/50 shadow-lg shadow-black/40 overflow-hidden group"
+                  disabled={isSending}
+                  className="relative w-full h-14 rounded-2xl font-bold text-base text-[#03120E] transition-all duration-150 active:scale-[0.985] cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#F4C95D]/50 shadow-lg shadow-black/40 overflow-hidden group disabled:opacity-60"
                   style={{
                     background: 'linear-gradient(90deg, #F8D978 0%, #F4C95D 50%, #E6A92D 100%)',
                   }}
                 >
                   <div className="absolute inset-0 bg-white/0 group-hover:bg-white/10 transition-colors" />
                   <span className="relative z-10 flex items-center justify-center font-bold tracking-tight text-[16px]">
-                    Send Recovery Instructions
+                    {isSending ? 'Sending...' : 'Send Recovery Instructions'}
                   </span>
                 </button>
               </div>
 
-              {/* Verified Honest Status Display (NO-DEMO POLICY ENFORCED) */}
-              {submissionStatus === 'blocked_no_backend' && (
-                <div className="mt-2 p-4 rounded-2xl bg-[#06271D] border border-[#F4C95D]/40 text-xs text-[#B7C8C1] animate-in fade-in duration-200 space-y-2.5">
-                  <div className="flex items-center gap-2">
-                    <span className="px-2 py-0.5 rounded text-[10px] font-bold tracking-wider uppercase bg-[#F4C95D]/15 text-[#F4C95D] border border-[#F4C95D]/30">
-                      BLOCKED BY EXTERNAL REQUIREMENT
-                    </span>
-                  </div>
+              {submissionStatus === 'sent' && (
+                <div className="mt-2 p-4 rounded-2xl bg-[#06271D] border border-[#00B887]/50 text-xs text-[#B7C8C1] animate-in fade-in duration-200 flex items-start gap-2.5">
+                  <CheckCircle2 className="w-4 h-4 text-[#00B887] shrink-0 mt-0.5" />
+                  <span>{statusMessage}</span>
+                </div>
+              )}
 
-                  <div className="flex items-start gap-2 text-white font-semibold">
-                    <ServerOff className="w-4 h-4 text-[#F4C95D] shrink-0 mt-0.5" />
-                    <span>Authentication Service Not Yet Configured</span>
-                  </div>
-
-                  <p className="text-[12px] leading-relaxed text-[#B7C8C1]">
-                    In accordance with the <strong>99Pay Strict Real Implementation Policy</strong>, recovery emails and OTP verification messages are never fabricated or simulated.
-                  </p>
-
-                  <div className="p-2.5 rounded-lg bg-[#0B211B] border border-[#24473A] space-y-1.5 text-[11px]">
-                    <span className="font-semibold text-white block">Requirements to Enable Real Recovery:</span>
-                    <ul className="list-disc list-inside space-y-1 text-[#B7C8C1]/90 pl-1">
-                      <li>Configure an official auth provider (e.g. Firebase Authentication).</li>
-                      <li>Enable Email Password Reset or Tanzanian SMS Gateway routing.</li>
-                      <li>Verify domain whitelisting and sender identity records.</li>
-                    </ul>
-                  </div>
-
-                  <div className="flex items-center gap-1.5 text-[11px] text-[#00B887]">
-                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                    <span>Local form input validation: <strong>IMPLEMENTED AND VERIFIED</strong></span>
-                  </div>
+              {(submissionStatus === 'error' || submissionStatus === 'phone_notice') && (
+                <div className="mt-2 p-4 rounded-2xl bg-[#06271D] border border-[#F4C95D]/40 text-xs text-[#B7C8C1] animate-in fade-in duration-200 flex items-start gap-2.5">
+                  <AlertCircle className="w-4 h-4 text-[#F4C95D] shrink-0 mt-0.5" />
+                  <span>{statusMessage}</span>
                 </div>
               )}
             </div>

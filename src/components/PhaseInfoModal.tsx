@@ -30,19 +30,19 @@ export const PhaseInfoModal: React.FC<PhaseInfoModalProps> = ({ type, onClose })
   > = {
     biometric: {
       icon: <Fingerprint className="w-8 h-8 text-[#00B887]" />,
-      badge: "NOT IMPLEMENTED IN THIS PHASE",
+      badge: "DEVICE BIOMETRIC HARDWARE",
       title: "Biometric Authentication",
-      subtitle: "Requires Android Keystore & BiometricPrompt API",
+      subtitle: "Requires Native Android Keystore & BiometricPrompt",
       description:
-        "Biometric authentication is not implemented in this phase. In accordance with the 99Pay Strict Real Implementation Policy, no fake fingerprint scanning or synthetic device permissions are simulated. Native Android BiometricPrompt with hardware-backed Keystore authentication will be integrated in a later stage.",
+        "Hardware biometric sign-in uses Android Keystore & BiometricPrompt when native biometric enrollment is linked. You can open and protect your local 99Pay Vault using your 4-digit Vault PIN.",
     },
     forgot_password: {
       icon: <KeyRound className="w-8 h-8 text-[#F4C95D]" />,
-      badge: "BLOCKED BY EXTERNAL REQUIREMENT",
+      badge: "CLOUD AUTH REQUIRED",
       title: "Password Recovery",
-      subtitle: "Authentication Provider Not Yet Configured",
+      subtitle: "External Authentication Provider Not Configured",
       description:
-        "Password recovery cannot be executed because no external authentication provider (such as Firebase Authentication or an authorized Tanzanian SMS/SMTP gateway) is provisioned. Fake recovery emails or synthetic OTP codes are strictly prohibited.",
+        "Online password reset emails and SMS OTPs require provisioning an authentication backend (e.g. Firebase Authentication or an authorized SMS/SMTP gateway).",
     },
     create_account: {
       icon: <UserPlus className="w-8 h-8 text-[#00B887]" />,
@@ -50,23 +50,23 @@ export const PhaseInfoModal: React.FC<PhaseInfoModalProps> = ({ type, onClose })
       title: "Account Registration",
       subtitle: "Navigating to Registration Screen",
       description:
-        "Navigating to the 99Pay Create Account screen where you can view and test the registration interface.",
+        "Navigating to the 99Pay Create Account screen.",
     },
     signin_validated: {
       icon: <ShieldCheck className="w-8 h-8 text-[#00B887]" />,
       badge: "LOCAL VALIDATION VERIFIED",
       title: "Inputs Validated Successfully",
-      subtitle: "Backend Session: BLOCKED BY EXTERNAL REQUIREMENT",
+      subtitle: "Local Vault Ready • Cloud Auth Pending",
       description:
-        "Input fields and format validation are IMPLEMENTED AND VERIFIED. Live credential verification and secure session token issuance are BLOCKED BY EXTERNAL REQUIREMENT because an authentication provider is not yet provisioned.",
+        "Input validation succeeded. Cloud authentication and session issuance require a configured backend provider; you can continue directly into your local device vault.",
     },
     registration_validated: {
       icon: <ShieldCheck className="w-8 h-8 text-[#00B887]" />,
       badge: "LOCAL VALIDATION VERIFIED",
       title: "Registration Form Validated",
-      subtitle: "Account Creation: BLOCKED BY EXTERNAL REQUIREMENT",
+      subtitle: "Cloud Account Sync Not Yet Provisioned",
       description:
-        "Full Name, Phone Number, Email, Password matching, and Terms acceptance are IMPLEMENTED AND VERIFIED. Persistent account creation and credential storage in a backend database are BLOCKED BY EXTERNAL REQUIREMENT pending provider configuration.",
+        "Full Name, Phone Number, Email, Password matching, and Terms acceptance are valid. Cloud user account storage requires provisioning an external authentication backend.",
     },
     terms_privacy: {
       icon: <FileCheck className="w-8 h-8 text-[#F4C95D]" />,

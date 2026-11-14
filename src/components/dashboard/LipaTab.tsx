@@ -11,6 +11,8 @@ interface LipaTabProps {
   onOpenQr: (item: LipaMerchantItem) => void;
   onCopy: (text: string, label: string) => void;
   onToggleFavorite: (id: string) => void;
+  onEditMerchant?: (item: LipaMerchantItem) => void;
+  onDeleteMerchant: (id: string) => void;
 }
 
 export const LipaTab: React.FC<LipaTabProps> = ({
@@ -20,6 +22,8 @@ export const LipaTab: React.FC<LipaTabProps> = ({
   onOpenQr,
   onCopy,
   onToggleFavorite,
+  onEditMerchant,
+  onDeleteMerchant,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
@@ -145,6 +149,8 @@ export const LipaTab: React.FC<LipaTabProps> = ({
           onOpenQr={onOpenQr}
           onCopy={onCopy}
           onToggleFavorite={onToggleFavorite}
+          onEditMerchant={onEditMerchant}
+          onDeleteMerchant={onDeleteMerchant}
           onOpenAddLipaModal={onOpenAddLipaModal}
         />
       </div>

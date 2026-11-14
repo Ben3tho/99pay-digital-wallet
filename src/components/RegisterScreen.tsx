@@ -9,13 +9,20 @@ import { RegisterPasswordField } from './RegisterPasswordField';
 import { TermsCheckboxRow } from './TermsCheckboxRow';
 import { RegisterFooter } from './RegisterFooter';
 import { PhaseInfoModal, ModalType } from './PhaseInfoModal';
-import { Shield, CheckCircle2 } from 'lucide-react';
+import { Shield, CheckCircle2, AlertCircle } from 'lucide-react';
+import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
+import { auth } from '../lib/firebase';
+import { syncUserProfileToCloud } from '../services/cloudVaultService';
 
 interface RegisterScreenProps {
   onNavigateToSignIn: () => void;
+  onNavigateToDashboard?: () => void;
 }
 
-export const RegisterScreen: React.FC<RegisterScreenProps> = ({ onNavigateToSignIn }) => {
+export const RegisterScreen: React.FC<RegisterScreenProps> = ({
+  onNavigateToSignIn,
+  onNavigateToDashboard,
+}) => {
   // Form State
   const [fullName, setFullName] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
@@ -34,9 +41,12 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({ onNavigateToSign
 
   // Phase Validation Notice
   const [validationSuccessNotice, setValidationSuccessNotice] = useState<string | null>(null);
+  const [registerError, setRegisterError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [activeModal, setActiveModal] = useState<ModalType>(null);
 
-  const handleCreateAccount = () => {
+  const handleCreateAccount = async () => {
+    setRegisterError(null);
     let hasError = false;
 
     // 1. Full Name Validation
@@ -115,11 +125,53 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({ onNavigateToSign
       return;
     }
 
-    // Strict Engineering Policy: Local validation succeeded; live account creation requires configured backend
-    setValidationSuccessNotice(
-      'Form input validation: IMPLEMENTED AND VERIFIED. Account creation & persistent user store: BLOCKED BY EXTERNAL REQUIREMENT (Authentication provider not yet provisioned).'
-    );
-    setActiveModal('registration_validated');
+    try {
+      const existingRaw = localStorage.getItem('99pay_vault_state_v1');
+      const existing = existingRaw ? JSON.parse(existingRaw) : {};
+      localStorage.setItem(
+        '99pay_vault_state_v1',
+        JSON.stringify({
+          ...existing,
+          userProfile: {
+            fullName: trimmedName,
+            phoneNumber: trimmedPhone,
+            email: trimmedEmail,
+          },
+        })
+      );
+    } catch {
+      // Ignore storage errors if quota restricted
+    }
+
+    setIsSubmitting(true);
+    try {
+      const cred = await createUserWithEmailAndPassword(auth, trimmedEmail, password);
+      await updateProfile(cred.user, { displayName: trimmedName });
+      await syncUserProfileToCloud(cred.user, {
+        fullName: trimmedName,
+        phoneNumber: trimmedPhone,
+        email: trimmedEmail,
+      });
+      setValidationSuccessNotice(
+        `Cloud account created for ${trimmedEmail} and synced securely.`
+      );
+      if (onNavigateToDashboard) {
+        onNavigateToDashboard();
+      }
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code || '';
+      if (code === 'auth/email-already-in-use') {
+        setRegisterError('An account with this email already exists. Please Sign In instead.');
+      } else if (code === 'auth/operation-not-allowed') {
+        setValidationSuccessNotice(
+          'Your profile was saved locally on this device. Email/Password registration requires enabling Email/Password provider in Firebase Console, or you can use Google Sign-In.'
+        );
+      } else {
+        setRegisterError(err instanceof Error ? err.message : 'Unable to register account.');
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -251,30 +303,47 @@ export const RegisterScreen: React.FC<RegisterScreenProps> = ({ onNavigateToSign
                 <button
                   type="button"
                   onClick={handleCreateAccount}
+                  disabled={isSubmitting}
                   aria-label="Submit account creation"
-                  className="relative w-full h-14 rounded-2xl font-bold text-base text-[#03120E] transition-all duration-150 active:scale-[0.985] cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#F4C95D]/50 shadow-lg shadow-black/40 overflow-hidden group"
+                  className="relative w-full h-14 rounded-2xl font-bold text-base text-[#03120E] transition-all duration-150 active:scale-[0.985] cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#F4C95D]/50 shadow-lg shadow-black/40 overflow-hidden group disabled:opacity-60"
                   style={{
                     background: 'linear-gradient(90deg, #F8D978 0%, #F4C95D 50%, #E6A92D 100%)',
                   }}
                 >
                   <div className="absolute inset-0 bg-white/0 group-hover:bg-white/10 transition-colors" />
                   <span className="relative z-10 flex items-center justify-center font-bold tracking-tight text-[16px]">
-                    Create Account
+                    {isSubmitting ? 'Creating Account...' : 'Create Account'}
                   </span>
                 </button>
               </div>
 
-              {/* Validation Status Banner (Strict Real Implementation Policy) */}
+              {registerError && (
+                <div className="mt-1 p-3 rounded-xl bg-rose-950/40 border border-rose-700/50 flex items-start gap-2 text-xs text-rose-200 animate-in fade-in duration-200">
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  <span>{registerError}</span>
+                </div>
+              )}
+
+              {/* Profile Saved Notice Banner */}
               {validationSuccessNotice && (
-                <div className="mt-1 p-3.5 rounded-xl bg-[#06271D] border border-[#F4C95D]/40 flex items-start gap-2.5 text-xs text-[#B7C8C1] animate-in fade-in duration-200">
+                <div className="mt-1 p-3.5 rounded-xl bg-[#06271D] border border-[#00B887]/40 flex items-start gap-2.5 text-xs text-[#B7C8C1] animate-in fade-in duration-200">
                   <CheckCircle2 className="w-4 h-4 text-[#00B887] shrink-0 mt-0.5" />
                   <div className="flex-1 space-y-1">
                     <span className="font-bold text-white block">
-                      Local Input Validation: <span className="text-[#00B887]">IMPLEMENTED AND VERIFIED</span>
+                      Profile Saved
                     </span>
                     <span className="text-[11px] block text-[#B7C8C1]">
-                      Backend Account Creation: <span className="text-[#F4C95D] font-semibold">BLOCKED BY EXTERNAL REQUIREMENT</span> (Requires live authentication provider configuration).
+                      {validationSuccessNotice}
                     </span>
+                    {onNavigateToDashboard && (
+                      <button
+                        type="button"
+                        onClick={onNavigateToDashboard}
+                        className="mt-1.5 text-[11px] font-bold text-[#F4C95D] hover:underline cursor-pointer"
+                      >
+                        Open 99Pay Dashboard →
+                      </button>
+                    )}
                   </div>
                 </div>
               )}

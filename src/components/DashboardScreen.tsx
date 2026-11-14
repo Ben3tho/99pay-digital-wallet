@@ -18,7 +18,10 @@ import { VaultBackupModal } from './dashboard/VaultBackupModal';
 import { NavigationDrawer } from './dashboard/NavigationDrawer';
 import { RecentTransactions } from './dashboard/RecentTransactions';
 import { CardBrandLogo } from './dashboard/CardBrandLogo';
+import type { EditingCardItem } from './dashboard/AddCardModal';
+import type { User } from 'firebase/auth';
 import {
+  INITIAL_USER_PROFILE,
   INITIAL_BANK_CARDS,
   INITIAL_MOBILE_MONEY,
   INITIAL_IDENTITIES,
@@ -26,6 +29,7 @@ import {
   INITIAL_LIPA_MERCHANTS,
   INITIAL_PENSION_LOYALTY,
   INITIAL_RECENT_TRANSACTIONS,
+  UserProfile,
   BankCardItem,
   MobileMoneyItem,
   IdentityDocItem,
@@ -35,6 +39,15 @@ import {
   TransactionItem,
   CardBrand,
 } from '../data/walletData';
+import {
+  hashVaultPin,
+  verifyVaultPin,
+  encryptWithPassphrase,
+  decryptWithPassphrase,
+  isEncryptedEnvelope,
+} from '../utils/vaultSecurity';
+import { syncNativeFlagSecure } from '../utils/nativeSecurity';
+import { collectVaultExpiryAlerts } from '../utils/expiryAlerts';
 import {
   CreditCard,
   Smartphone,
@@ -47,18 +60,24 @@ import {
   ShieldCheck,
   Trash2,
   Star,
+  Pencil,
+  AlertTriangle,
 } from 'lucide-react';
 import { Language, TRANSLATIONS } from '../i18n/translations';
 
 const VAULT_STORAGE_KEY = '99pay_vault_state_v1';
 
 interface PersistedVaultState {
+  userProfile?: UserProfile;
+  vaultPinHash?: string | null;
   bankCards?: BankCardItem[];
   mobileWallets?: MobileMoneyItem[];
   identities?: IdentityDocItem[];
   insuranceDocs?: InsuranceDocItem[];
   lipaMerchants?: LipaMerchantItem[];
   pensionCards?: PensionLoyaltyItem[];
+  transactions?: TransactionItem[];
+  auditLogs?: AuditLogEntry[];
   lang?: Language;
   autoLockSeconds?: number;
   isFlagSecureEnabled?: boolean;
@@ -77,10 +96,16 @@ function loadPersistedVault(): PersistedVaultState {
 
 interface DashboardScreenProps {
   onSignOut: () => void;
+  firebaseUser?: User | null;
 }
 
-export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onSignOut }) => {
+export const DashboardScreen: React.FC<DashboardScreenProps> = ({
+  onSignOut,
+  firebaseUser = null,
+}) => {
   const initialVault = useRef<PersistedVaultState>(loadPersistedVault()).current;
+  const sessionPinRef = useRef<string | null>(null);
+  const [encryptionEpoch, setEncryptionEpoch] = useState(0);
 
   // Navigation Drawer State
   const [isNavDrawerOpen, setIsNavDrawerOpen] = useState(false);
@@ -91,6 +116,14 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onSignOut }) =
   // Bilingual Language State
   const [lang, setLang] = useState<Language>(initialVault.lang || 'sw');
   const t = TRANSLATIONS[lang];
+
+  // Real User Profile & Hashed PIN State
+  const [userProfile, setUserProfile] = useState<UserProfile>(
+    initialVault.userProfile ?? INITIAL_USER_PROFILE
+  );
+  const [vaultPinHash, setVaultPinHash] = useState<string | null>(
+    initialVault.vaultPinHash ?? null
+  );
 
   // Vault Data State (Local non-custodial state persisted in localStorage)
   const [bankCards, setBankCards] = useState<BankCardItem[]>(
@@ -111,7 +144,9 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onSignOut }) =
   const [pensionCards, setPensionCards] = useState<PensionLoyaltyItem[]>(
     initialVault.pensionCards ?? INITIAL_PENSION_LOYALTY
   );
-  const [recentTransactions] = useState<TransactionItem[]>(INITIAL_RECENT_TRANSACTIONS);
+  const [recentTransactions, setRecentTransactions] = useState<TransactionItem[]>(
+    initialVault.transactions ?? INITIAL_RECENT_TRANSACTIONS
+  );
 
   // Wallet Tab Sub-Filter (Zote | Benki | Pochi za Simu)
   const [walletFilter, setWalletFilter] = useState<'all' | 'bank' | 'momo'>('all');
@@ -128,36 +163,106 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onSignOut }) =
     initialVault.isBiometricEnabled ?? true
   );
 
-  // Save Vault changes locally
+  // Security Audit Log State (starts clean; records real user actions)
+  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>(initialVault.auditLogs ?? []);
+
+  // Sync Firebase user profile defaults if local profile is blank
   useEffect(() => {
-    try {
-      const payload: PersistedVaultState = {
-        bankCards,
-        mobileWallets,
-        identities,
-        insuranceDocs,
-        lipaMerchants,
-        pensionCards,
-        lang,
-        autoLockSeconds,
-        isFlagSecureEnabled,
-        isBiometricEnabled,
-      };
-      window.localStorage.setItem(VAULT_STORAGE_KEY, JSON.stringify(payload));
-    } catch {
-      // Ignore storage quota errors in restricted webviews
+    if (firebaseUser) {
+      setUserProfile((prev) => ({
+        fullName: prev.fullName || firebaseUser.displayName || '',
+        phoneNumber: prev.phoneNumber || firebaseUser.phoneNumber || '',
+        email: prev.email || firebaseUser.email || '',
+      }));
     }
+  }, [firebaseUser]);
+
+  // Sync native Android Window FLAG_SECURE when toggled
+  useEffect(() => {
+    void syncNativeFlagSecure(isFlagSecureEnabled);
+  }, [isFlagSecureEnabled]);
+
+  // Save Vault changes locally (with AES-256-GCM encryption for card numbers & document numbers when PIN key is active)
+  useEffect(() => {
+    let cancelled = false;
+    const persistVault = async () => {
+      try {
+        const activePin = sessionPinRef.current;
+        const canEncrypt =
+          Boolean(activePin) &&
+          typeof window !== 'undefined' &&
+          Boolean(window.crypto?.subtle);
+
+        const persistedCards = canEncrypt && activePin
+          ? await Promise.all(
+              bankCards.map(async (c) => {
+                if (!c.fullNumber || isEncryptedEnvelope(c.fullNumber)) return c;
+                return {
+                  ...c,
+                  fullNumber: await encryptWithPassphrase(c.fullNumber, activePin),
+                };
+              })
+            )
+          : bankCards;
+
+        const persistedIdentities = canEncrypt && activePin
+          ? await Promise.all(
+              identities.map(async (docItem) => {
+                if (!docItem.documentNumber || isEncryptedEnvelope(docItem.documentNumber)) {
+                  return docItem;
+                }
+                return {
+                  ...docItem,
+                  documentNumber: await encryptWithPassphrase(docItem.documentNumber, activePin),
+                };
+              })
+            )
+          : identities;
+
+        if (cancelled) return;
+
+        const payload: PersistedVaultState = {
+          userProfile,
+          vaultPinHash,
+          bankCards: persistedCards,
+          mobileWallets,
+          identities: persistedIdentities,
+          insuranceDocs,
+          lipaMerchants,
+          pensionCards,
+          transactions: recentTransactions,
+          auditLogs: auditLogs.slice(0, 50),
+          lang,
+          autoLockSeconds,
+          isFlagSecureEnabled,
+          isBiometricEnabled,
+        };
+        window.localStorage.setItem(VAULT_STORAGE_KEY, JSON.stringify(payload));
+      } catch {
+        // Ignore storage quota errors in restricted webviews
+      }
+    };
+
+    void persistVault();
+    return () => {
+      cancelled = true;
+    };
   }, [
+    userProfile,
+    vaultPinHash,
     bankCards,
     mobileWallets,
     identities,
     insuranceDocs,
     lipaMerchants,
     pensionCards,
+    recentTransactions,
+    auditLogs,
     lang,
     autoLockSeconds,
     isFlagSecureEnabled,
     isBiometricEnabled,
+    encryptionEpoch,
   ]);
 
   // Card Number Reveal Challenge (PIN/Biometric)
@@ -166,12 +271,14 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onSignOut }) =
   const [revealedCardId, setRevealedCardId] = useState<string | null>(null);
   const [revealedSecondsRemaining, setRevealedSecondsRemaining] = useState<number>(10);
 
-  // Feature Modals
+  // Feature Modals & Editing States
   const [isAddLipaModalOpen, setIsAddLipaModalOpen] = useState(false);
+  const [editingLipaMerchant, setEditingLipaMerchant] = useState<LipaMerchantItem | null>(null);
   const [activeQrMerchant, setActiveQrMerchant] = useState<LipaMerchantItem | null>(null);
   const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [addModalInitialTab, setAddModalInitialTab] = useState<AddModalTab>('bank');
+  const [editingCardItem, setEditingCardItem] = useState<EditingCardItem | null>(null);
   const [isSecurityModalOpen, setIsSecurityModalOpen] = useState(false);
 
   // Toast Notification
@@ -182,31 +289,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onSignOut }) =
       setToastMessage((prev) => (prev === msg ? null : prev));
     }, 2800);
   }, []);
-
-  // Security Audit Log State
-  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([
-    {
-      id: 'log-1',
-      action: 'Vault Imeruhusiwa',
-      details: 'Akaunti ya Joseph B. Mlay imefunguliwa kwa mafanikio',
-      timestamp: 'Sasa hivi',
-      status: 'safe',
-    },
-    {
-      id: 'log-2',
-      action: 'Android FLAG_SECURE',
-      details: 'Screenshot & screen recording blocker imeamilishwa',
-      timestamp: 'Dakika 1 iliyopita',
-      status: 'safe',
-    },
-    {
-      id: 'log-3',
-      action: 'Keystore Hardware Enclave',
-      details: 'Uthibitisho wa 256-bit AES encryption umehakikiwa',
-      timestamp: 'Dakika 2 zilizopita',
-      status: 'info',
-    },
-  ]);
 
   const addAuditLog = useCallback(
     (action: string, details: string, status: 'safe' | 'warning' | 'info' = 'safe') => {
@@ -301,8 +383,50 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onSignOut }) =
     };
   }, [revealedCardId]);
 
+  const decryptSecretsInMemory = useCallback(
+    async (pin: string) => {
+      sessionPinRef.current = pin;
+
+      const hasEncryptedCard = bankCards.some((c) => isEncryptedEnvelope(c.fullNumber));
+      if (hasEncryptedCard) {
+        const decryptedCards = await Promise.all(
+          bankCards.map(async (c) => {
+            if (!c.fullNumber || !isEncryptedEnvelope(c.fullNumber)) return c;
+            try {
+              return { ...c, fullNumber: await decryptWithPassphrase(c.fullNumber, pin) };
+            } catch {
+              return c;
+            }
+          })
+        );
+        setBankCards(decryptedCards);
+      }
+
+      const hasEncryptedId = identities.some((d) => isEncryptedEnvelope(d.documentNumber));
+      if (hasEncryptedId) {
+        const decryptedIds = await Promise.all(
+          identities.map(async (d) => {
+            if (!d.documentNumber || !isEncryptedEnvelope(d.documentNumber)) return d;
+            try {
+              return { ...d, documentNumber: await decryptWithPassphrase(d.documentNumber, pin) };
+            } catch {
+              return d;
+            }
+          })
+        );
+        setIdentities(decryptedIds);
+      }
+
+      setEncryptionEpoch((e) => e + 1);
+    },
+    [bankCards, identities]
+  );
+
   // Handle PIN Challenge Success
-  const handlePinSuccess = () => {
+  const handlePinSuccess = async (verifiedPin?: string) => {
+    if (verifiedPin) {
+      await decryptSecretsInMemory(verifiedPin);
+    }
     if (pendingCardForReveal) {
       setRevealedCardId(pendingCardForReveal.id);
       addAuditLog(
@@ -324,7 +448,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onSignOut }) =
     setRevealedCardId(null);
   };
 
-  // Add Handlers
+  // Add & Update Handlers
   const handleAddBankCard = (card: BankCardItem) => {
     setBankCards((prev) => {
       const updatedPrev = card.isDefault ? prev.map((c) => ({ ...c, isDefault: false })) : prev;
@@ -340,6 +464,13 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onSignOut }) =
     setActiveTab('wallet');
   };
 
+  const handleUpdateBankCard = (updated: BankCardItem) => {
+    setBankCards((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+    const label = updated.bankName === 'Other Bank' && updated.customBankName ? updated.customBankName : updated.bankName;
+    addAuditLog('Kadi Imehaririwa', `${label} (${updated.cardType}) imesasishwa`, 'info');
+    showToast(lang === 'sw' ? `${label} imesasishwa!` : `${label} updated!`);
+  };
+
   const handleAddMobileMoney = (momo: MobileMoneyItem) => {
     setMobileWallets((prev) => {
       const updatedPrev = momo.isPrimary ? prev.map((w) => ({ ...w, isPrimary: false })) : prev;
@@ -350,11 +481,23 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onSignOut }) =
     setActiveTab('wallet');
   };
 
+  const handleUpdateMobileMoney = (updated: MobileMoneyItem) => {
+    setMobileWallets((prev) => prev.map((w) => (w.id === updated.id ? updated : w)));
+    addAuditLog('Pochi Imehaririwa', `${updated.provider} (${updated.phoneNumber}) imesasishwa`, 'info');
+    showToast(lang === 'sw' ? `${updated.provider} imesasishwa!` : `${updated.provider} updated!`);
+  };
+
   const handleAddIdentity = (idItem: IdentityDocItem) => {
     setIdentities((prev) => [idItem, ...prev]);
-    addAuditLog('Kitambulisho Kipya', `${idItem.docType} (${idItem.documentNumber}) kimeongezwa`, 'safe');
+    addAuditLog('Kitambulisho Kipya', `${idItem.docType} kimeongezwa`, 'safe');
     showToast(lang === 'sw' ? `${idItem.docType} kimehifadhiwa!` : `${idItem.docType} saved!`);
     setActiveTab('vault');
+  };
+
+  const handleUpdateIdentity = (updated: IdentityDocItem) => {
+    setIdentities((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
+    addAuditLog('Kitambulisho Kimehaririwa', `${updated.docType} kimesasishwa`, 'info');
+    showToast(lang === 'sw' ? `${updated.docType} kimesasishwa!` : `${updated.docType} updated!`);
   };
 
   const handleAddInsurance = (ins: InsuranceDocItem) => {
@@ -362,6 +505,31 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onSignOut }) =
     addAuditLog('Kadi ya Bima Mpya', `${ins.provider} (${ins.schemeName}) imeongezwa`, 'safe');
     showToast(lang === 'sw' ? `${ins.provider} imehifadhiwa!` : `${ins.provider} saved!`);
     setActiveTab('vault');
+  };
+
+  const handleUpdateInsurance = (updated: InsuranceDocItem) => {
+    setInsuranceDocs((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
+    addAuditLog('Bima Imehaririwa', `${updated.provider} imesasishwa`, 'info');
+    showToast(lang === 'sw' ? `${updated.provider} imesasishwa!` : `${updated.provider} updated!`);
+  };
+
+  const handleAddPension = (pen: PensionLoyaltyItem) => {
+    setPensionCards((prev) => [pen, ...prev]);
+    addAuditLog('Kadi ya Mfuko / Uanachama', `${pen.title} (${pen.membershipNumber}) imeongezwa`, 'safe');
+    showToast(lang === 'sw' ? `${pen.title} imehifadhiwa!` : `${pen.title} saved!`);
+    setActiveTab('vault');
+  };
+
+  const handleUpdatePension = (updated: PensionLoyaltyItem) => {
+    setPensionCards((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+    addAuditLog('Mfuko Umehaririwa', `${updated.title} imesasishwa`, 'info');
+    showToast(lang === 'sw' ? `${updated.title} imesasishwa!` : `${updated.title} updated!`);
+  };
+
+  const handleDeletePensionCard = (id: string) => {
+    setPensionCards((prev) => prev.filter((p) => p.id !== id));
+    addAuditLog('Kadi Imefutwa', 'Kadi ya mfuko/uanachama imeondolewa', 'warning');
+    showToast(lang === 'sw' ? 'Imefutwa kwenye vault.' : 'Removed from vault.');
   };
 
   const handleAddLipaMerchant = (item: LipaMerchantItem) => {
@@ -374,11 +542,60 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onSignOut }) =
     );
   };
 
+  const handleUpdateLipaMerchant = (updated: LipaMerchantItem) => {
+    setLipaMerchants((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
+    addAuditLog('Lipa Namba Imehaririwa', `${updated.merchantName} imesasishwa`, 'info');
+    showToast(lang === 'sw' ? `${updated.merchantName} imesasishwa!` : `${updated.merchantName} updated!`);
+  };
+
+  const handleDeleteLipaMerchant = (id: string) => {
+    setLipaMerchants((prev) => prev.filter((m) => m.id !== id));
+    addAuditLog('Lipa Namba Imefutwa', 'Biashara imeondolewa kwenye orodha ya Till', 'warning');
+    showToast(lang === 'sw' ? 'Lipa Namba imefutwa.' : 'Merchant removed.');
+  };
+
   const handleToggleFavoriteLipa = (id: string) => {
     setLipaMerchants((prev) =>
       prev.map((m) => (m.id === id ? { ...m, favorite: !m.favorite } : m))
     );
   };
+
+  const handleAddTransaction = (tx: TransactionItem) => {
+    setRecentTransactions((prev) => [tx, ...prev]);
+    addAuditLog('Muamala Umerekodiwa', `${tx.title} (TZS ${tx.amount.toLocaleString()})`, 'info');
+    showToast(lang === 'sw' ? 'Muamala umehifadhiwa!' : 'Transaction recorded!');
+  };
+
+  const handleUpdateTransaction = (updated: TransactionItem) => {
+    setRecentTransactions((prev) => prev.map((tx) => (tx.id === updated.id ? updated : tx)));
+    addAuditLog('Muamala Umehaririwa', `${updated.title} umesasishwa`, 'info');
+    showToast(lang === 'sw' ? 'Muamala umesasishwa!' : 'Transaction updated!');
+  };
+
+  const handleDeleteTransaction = (id: string) => {
+    setRecentTransactions((prev) => prev.filter((tx) => tx.id !== id));
+    showToast(lang === 'sw' ? 'Muamala umefutwa.' : 'Transaction removed.');
+  };
+
+  const handleVerifyPin = useCallback(
+    async (enteredPin: string) => {
+      if (!vaultPinHash) return false;
+      return verifyVaultPin(enteredPin, vaultPinHash);
+    },
+    [vaultPinHash]
+  );
+
+  const handleSetPin = useCallback(
+    async (newPin: string) => {
+      const hashed = await hashVaultPin(newPin);
+      sessionPinRef.current = newPin;
+      setVaultPinHash(hashed);
+      setEncryptionEpoch((e) => e + 1);
+      addAuditLog('PIN ya Vault Imewekwa', 'PIN binafsi ya tarakimu 4 imehifadhiwa na kusimba AES-256-GCM', 'safe');
+      showToast(lang === 'sw' ? 'PIN ya Vault imehifadhiwa!' : 'Vault PIN saved!');
+    },
+    [addAuditLog, showToast, lang]
+  );
 
   // Active Detail Sheet State
   const [activeItemDetail, setActiveItemDetail] = useState<{
@@ -398,6 +615,35 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onSignOut }) =
     } else if (detail.type === 'momo') {
       setMobileWallets((prev) => prev.map((w) => ({ ...w, isPrimary: w.id === detail.id })));
       showToast(lang === 'sw' ? 'Imewekwa kuwa pochi kuu!' : 'Set as primary wallet!');
+    }
+    setActiveItemDetail(null);
+  };
+
+  const handleEditDetailItem = (detail: NonNullable<typeof activeItemDetail>) => {
+    if (detail.type === 'bank') {
+      const card = bankCards.find((c) => c.id === detail.id);
+      if (card) {
+        setEditingCardItem({ type: 'bank', item: card });
+        setIsAddModalOpen(true);
+      }
+    } else if (detail.type === 'momo') {
+      const momo = mobileWallets.find((w) => w.id === detail.id);
+      if (momo) {
+        setEditingCardItem({ type: 'momo', item: momo });
+        setIsAddModalOpen(true);
+      }
+    } else if (detail.type === 'id') {
+      const doc = identities.find((d) => d.id === detail.id);
+      if (doc) {
+        setEditingCardItem({ type: 'id', item: doc });
+        setIsAddModalOpen(true);
+      }
+    } else if (detail.type === 'insurance') {
+      const ins = insuranceDocs.find((i) => i.id === detail.id);
+      if (ins) {
+        setEditingCardItem({ type: 'insurance', item: ins });
+        setIsAddModalOpen(true);
+      }
     }
     setActiveItemDetail(null);
   };
@@ -422,34 +668,35 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onSignOut }) =
 
   // Restore and Emergency Wipe Handlers
   const handleRestoreData = (restoredPayload: any) => {
+    if (restoredPayload.userProfile) setUserProfile(restoredPayload.userProfile);
     if (restoredPayload.bankCards) setBankCards(restoredPayload.bankCards);
     if (restoredPayload.mobileWallets) setMobileWallets(restoredPayload.mobileWallets);
     if (restoredPayload.identities) setIdentities(restoredPayload.identities);
     if (restoredPayload.insuranceDocs) setInsuranceDocs(restoredPayload.insuranceDocs);
     if (restoredPayload.lipaMerchants) setLipaMerchants(restoredPayload.lipaMerchants);
     if (restoredPayload.pensionCards) setPensionCards(restoredPayload.pensionCards);
+    if (restoredPayload.transactions) setRecentTransactions(restoredPayload.transactions);
 
     addAuditLog('Vault Imerudishwa', 'Taarifa zimerudishwa kutoka kwenye faili la nakala', 'safe');
     showToast(lang === 'sw' ? 'Vault imerejeshwa!' : 'Vault restored!');
   };
 
   const handleEmergencyWipe = () => {
+    setUserProfile(INITIAL_USER_PROFILE);
+    setVaultPinHash(null);
     setBankCards([]);
     setMobileWallets([]);
     setIdentities([]);
     setInsuranceDocs([]);
     setLipaMerchants([]);
     setPensionCards([]);
+    setRecentTransactions([]);
+    setAuditLogs([]);
     try {
       window.localStorage.removeItem(VAULT_STORAGE_KEY);
     } catch {
       // ignore
     }
-    addAuditLog(
-      'EMERGENCY WIPE',
-      'Data zote zimefutwa kabisa kutoka kwenye kumbukumbu ya simu',
-      'warning'
-    );
     showToast(lang === 'sw' ? 'Data zote zimefutwa!' : 'All vault data wiped!');
   };
 
@@ -476,8 +723,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onSignOut }) =
 
   const totalWalletCount = bankCards.length + mobileWallets.length;
   const totalVaultCount = identities.length + insuranceDocs.length + pensionCards.length;
+  const expiryAlerts = collectVaultExpiryAlerts(bankCards, identities, 45);
 
   const openContextualAdd = () => {
+    setEditingCardItem(null);
+    setEditingLipaMerchant(null);
     if (activeTab === 'lipa') {
       setIsAddLipaModalOpen(true);
     } else if (activeTab === 'vault') {
@@ -510,9 +760,17 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onSignOut }) =
       {isVaultLocked && (
         <VaultLockScreen
           reason={lockReason}
-          onUnlock={() => {
+          hasVaultPin={Boolean(vaultPinHash)}
+          onVerifyPin={handleVerifyPin}
+          onSetPin={handleSetPin}
+          isBiometricEnabled={isBiometricEnabled}
+          lang={lang}
+          onUnlock={(verifiedPin) => {
+            if (verifiedPin) {
+              void decryptSecretsInMemory(verifiedPin);
+            }
             setIsVaultLocked(false);
-            addAuditLog('Vault Imefunguliwa', 'Mtumiaji amethibitisha kwa PIN/Biometrics', 'safe');
+            addAuditLog('Vault Imefunguliwa', 'Mtumiaji amefungua vault', 'safe');
             resetInactivityTimer();
           }}
         />
@@ -533,6 +791,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onSignOut }) =
           <DashboardHeader
             onOpenNavigationDrawer={() => setIsNavDrawerOpen(true)}
             lang={lang}
+            userFullName={userProfile.fullName}
           />
 
           {/* ============================================================== */}
@@ -560,9 +819,58 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onSignOut }) =
 
                 <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-[#03120E]/80 border border-[#24473A] text-[10px] text-[#00B887] font-semibold">
                   <ShieldCheck className="w-3.5 h-3.5" />
-                  <span>256-Bit Vault</span>
+                  <span>{vaultPinHash ? 'AES-256 Vault' : '256-Bit Vault'}</span>
                 </div>
               </div>
+
+              {/* Expiry Alerts Banner */}
+              {expiryAlerts.length > 0 && (
+                <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/35 flex items-start gap-2.5 text-xs">
+                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0 space-y-1">
+                    <span className="font-bold text-amber-200 block text-[11px]">
+                      {lang === 'sw'
+                        ? `Tahadhari ya Muda wa Kuisha (${expiryAlerts.length})`
+                        : `Expiry Alerts (${expiryAlerts.length})`}
+                    </span>
+                    {expiryAlerts.slice(0, 2).map((alertItem) => (
+                      <button
+                        key={alertItem.id}
+                        type="button"
+                        onClick={() => {
+                          if (alertItem.sourceType === 'bank') {
+                            const card = bankCards.find((c) => c.id === alertItem.id);
+                            if (card) {
+                              setEditingCardItem({ type: 'bank', item: card });
+                              setIsAddModalOpen(true);
+                            }
+                          } else {
+                            const docItem = identities.find((d) => d.id === alertItem.id);
+                            if (docItem) {
+                              setEditingCardItem({ type: 'id', item: docItem });
+                              setIsAddModalOpen(true);
+                            }
+                          }
+                        }}
+                        className="w-full text-left flex items-center justify-between gap-2 text-[11px] text-[#B7C8C1] hover:text-white cursor-pointer"
+                      >
+                        <span className="truncate">{alertItem.title}</span>
+                        <span
+                          className={`font-mono font-bold shrink-0 ${
+                            alertItem.status === 'expired' ? 'text-rose-300' : 'text-amber-300'
+                          }`}
+                        >
+                          {alertItem.status === 'expired'
+                            ? lang === 'sw'
+                              ? 'Imeisha'
+                              : 'Expired'
+                            : `${alertItem.daysRemaining}d`}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Sub-Filter Pills (Vyote | Benki | Pochi za Simu) */}
               <div className="grid grid-cols-3 gap-1.5 p-1 rounded-2xl bg-[#0B211B] border border-[#24473A]">
@@ -660,7 +968,9 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onSignOut }) =
                         title: bankDisplay,
                         subtitle: `${card.tier} • ${card.cardType}`,
                         primaryNumber:
-                          revealedCardId === card.id && card.fullNumber
+                          revealedCardId === card.id &&
+                          card.fullNumber &&
+                          !isEncryptedEnvelope(card.fullNumber)
                             ? card.fullNumber
                             : card.maskedNumber,
                         details: [
@@ -721,7 +1031,13 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onSignOut }) =
               )}
 
               {/* 3. Recent Transactions Section */}
-              <RecentTransactions transactions={recentTransactions} lang={lang} />
+              <RecentTransactions
+                transactions={recentTransactions}
+                lang={lang}
+                onAddTransaction={handleAddTransaction}
+                onUpdateTransaction={handleUpdateTransaction}
+                onDeleteTransaction={handleDeleteTransaction}
+              />
             </div>
           )}
 
@@ -732,10 +1048,18 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onSignOut }) =
             <LipaTab
               merchants={lipaMerchants}
               lang={lang}
-              onOpenAddLipaModal={() => setIsAddLipaModalOpen(true)}
+              onOpenAddLipaModal={() => {
+                setEditingLipaMerchant(null);
+                setIsAddLipaModalOpen(true);
+              }}
               onOpenQr={(merchant) => setActiveQrMerchant(merchant)}
               onCopy={(txt, lbl) => copyToClipboard(txt, lbl)}
               onToggleFavorite={handleToggleFavoriteLipa}
+              onEditMerchant={(merchant) => {
+                setEditingLipaMerchant(merchant);
+                setIsAddLipaModalOpen(true);
+              }}
+              onDeleteMerchant={handleDeleteLipaMerchant}
             />
           )}
 
@@ -749,13 +1073,19 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onSignOut }) =
           {/* ============================================================== */}
           {activeTab === 'vault' && (
             <VaultSettingsTab
+              userProfile={userProfile}
+              onUpdateProfile={(profile) => {
+                setUserProfile(profile);
+                showToast(lang === 'sw' ? 'Wasifu umehifadhiwa!' : 'Profile updated!');
+              }}
               identities={identities}
               insuranceDocs={insuranceDocs}
               pensionCards={pensionCards}
               lang={lang}
               onToggleLang={() => setLang(lang === 'sw' ? 'en' : 'sw')}
-              onOpenAddModal={() => {
-                setAddModalInitialTab('id');
+              onOpenAddModal={(tab = 'id') => {
+                setEditingCardItem(null);
+                setAddModalInitialTab(tab);
                 setIsAddModalOpen(true);
               }}
               onOpenBackupModal={() => setIsBackupModalOpen(true)}
@@ -766,16 +1096,28 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onSignOut }) =
               onSignOut={onSignOut}
               onEmergencyWipe={handleEmergencyWipe}
               copyToClipboard={copyToClipboard}
+              onEditPensionCard={(pen) => {
+                setEditingCardItem({ type: 'pension', item: pen });
+                setIsAddModalOpen(true);
+              }}
+              onDeletePensionCard={handleDeletePensionCard}
               onViewIdentityDetail={(item) =>
                 setActiveItemDetail({
                   id: item.id,
                   type: 'id',
                   title: item.docType,
                   subtitle: item.fullName,
-                  primaryNumber: item.documentNumber,
+                  primaryNumber: isEncryptedEnvelope(item.documentNumber)
+                    ? '•••• •••• •••• (PIN Locked)'
+                    : item.documentNumber,
                   details: [
                     { label: 'Jina Kamili', value: item.fullName },
-                    { label: 'Namba ya Hati', value: item.documentNumber },
+                    {
+                      label: 'Namba ya Hati',
+                      value: isEncryptedEnvelope(item.documentNumber)
+                        ? '•••• (Imelindwa kwa PIN)'
+                        : item.documentNumber,
+                    },
                     { label: 'Tarehe ya Kutolewa', value: item.issueDate },
                     { label: 'Mamlaka ya Utoaji', value: item.issuingAuthority },
                     { label: 'Tarehe ya Kuisha', value: item.expiryDate || 'Haina Ukomo' },
@@ -924,7 +1266,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onSignOut }) =
                   <button
                     type="button"
                     onClick={() => handleSetDefaultItem(activeItemDetail)}
-                    className="py-2.5 rounded-xl bg-[#00B887]/15 hover:bg-[#00B887]/25 border border-[#00B887]/40 text-xs font-bold text-[#00B887] flex items-center justify-center gap-1.5 cursor-pointer"
+                    className="col-span-2 py-2.5 rounded-xl bg-[#00B887]/15 hover:bg-[#00B887]/25 border border-[#00B887]/40 text-xs font-bold text-[#00B887] flex items-center justify-center gap-1.5 cursor-pointer"
                   >
                     <Star className="w-3.5 h-3.5" />
                     <span>{lang === 'sw' ? 'Weka Kuu' : 'Set Primary'}</span>
@@ -933,15 +1275,20 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onSignOut }) =
 
                 <button
                   type="button"
+                  onClick={() => handleEditDetailItem(activeItemDetail)}
+                  className="py-2.5 rounded-xl bg-[#0B211B] hover:bg-[#03120E] border border-[#00B887]/40 text-xs font-bold text-[#F4C95D] flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                  <span>{lang === 'sw' ? 'Hariri' : 'Edit'}</span>
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => handleDeleteDetailItem(activeItemDetail)}
-                  className={`py-2.5 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/50 text-xs font-bold text-rose-300 flex items-center justify-center gap-1.5 cursor-pointer ${
-                    activeItemDetail.type === 'bank' || activeItemDetail.type === 'momo'
-                      ? ''
-                      : 'col-span-2'
-                  }`}
+                  className="py-2.5 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/50 text-xs font-bold text-rose-300 flex items-center justify-center gap-1.5 cursor-pointer"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
-                  <span>{lang === 'sw' ? 'Futa Kadi' : 'Delete Item'}</span>
+                  <span>{lang === 'sw' ? 'Futa' : 'Delete'}</span>
                 </button>
               </div>
 
@@ -957,11 +1304,16 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onSignOut }) =
         </div>
       )}
 
-      {/* Add Lipa Namba Modal */}
+      {/* Add / Edit Lipa Namba Modal */}
       <AddLipaNambaModal
         isOpen={isAddLipaModalOpen}
-        onClose={() => setIsAddLipaModalOpen(false)}
+        onClose={() => {
+          setIsAddLipaModalOpen(false);
+          setEditingLipaMerchant(null);
+        }}
         onAdd={handleAddLipaMerchant}
+        onUpdate={handleUpdateLipaMerchant}
+        editingMerchant={editingLipaMerchant}
         lang={lang}
       />
 
@@ -977,13 +1329,18 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onSignOut }) =
         isOpen={isBackupModalOpen}
         onClose={() => setIsBackupModalOpen(false)}
         lang={lang}
+        hasVaultPin={Boolean(vaultPinHash)}
+        onVerifyPin={handleVerifyPin}
+        firebaseUser={firebaseUser}
         vaultData={{
+          userProfile,
           bankCards,
           mobileWallets,
           identities,
           insuranceDocs,
           lipaMerchants,
           pensionCards,
+          transactions: recentTransactions,
         }}
         onRestoreData={handleRestoreData}
         onEmergencyWipe={handleEmergencyWipe}
@@ -993,6 +1350,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onSignOut }) =
       <SecurityCenterModal
         isOpen={isSecurityModalOpen}
         onClose={() => setIsSecurityModalOpen(false)}
+        lang={lang}
+        hasVaultPin={Boolean(vaultPinHash)}
+        onVerifyPin={handleVerifyPin}
+        onUpdateVaultPin={handleSetPin}
         autoLockSeconds={autoLockSeconds}
         onChangeAutoLock={(sec) => {
           setAutoLockSeconds(sec);
@@ -1020,6 +1381,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onSignOut }) =
         }}
         auditLogs={auditLogs}
         onLockVaultNow={() => handleLockVault('Vault imefungwa mara moja na mtumiaji')}
+        hasCloudSync={Boolean(firebaseUser)}
+        userDisplayName={userProfile.fullName || firebaseUser?.displayName || ''}
       />
 
       {/* PIN Prompt Modal for Revealing Sensitive Numbers */}
@@ -1030,22 +1393,42 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onSignOut }) =
           setPendingCardForReveal(null);
         }}
         onSuccess={handlePinSuccess}
-        title="Thibitisha Kuona Namba ya Kadi"
+        hasVaultPin={Boolean(vaultPinHash)}
+        onVerifyPin={handleVerifyPin}
+        onSetPin={handleSetPin}
+        isBiometricEnabled={
+          isBiometricEnabled &&
+          !(pendingCardForReveal?.fullNumber && isEncryptedEnvelope(pendingCardForReveal.fullNumber))
+        }
+        lang={lang}
+        title={lang === 'sw' ? 'Thibitisha Kuona Namba ya Kadi' : 'Confirm to Reveal Card Number'}
         reason={
           pendingCardForReveal
-            ? `Weka PIN yako kuthibitisha kuonyesha namba kamili ya kadi ya ${pendingCardForReveal.bankName}`
+            ? lang === 'sw'
+              ? `Weka PIN yako kuthibitisha kuonyesha namba kamili ya kadi ya ${pendingCardForReveal.bankName}`
+              : `Enter your Vault PIN to reveal full card number for ${pendingCardForReveal.bankName}`
             : undefined
         }
       />
 
-      {/* Add New Card / ID Modal */}
+      {/* Add / Edit Card / ID Modal */}
       <AddCardModal
         isOpen={isAddModalOpen}
-        onClose={() => setIsAddModalOpen(false)}
+        onClose={() => {
+          setIsAddModalOpen(false);
+          setEditingCardItem(null);
+        }}
         onAddBankCard={handleAddBankCard}
         onAddMobileMoney={handleAddMobileMoney}
         onAddIdentity={handleAddIdentity}
         onAddInsurance={handleAddInsurance}
+        onAddPension={handleAddPension}
+        onUpdateBankCard={handleUpdateBankCard}
+        onUpdateMobileMoney={handleUpdateMobileMoney}
+        onUpdateIdentity={handleUpdateIdentity}
+        onUpdateInsurance={handleUpdateInsurance}
+        onUpdatePension={handleUpdatePension}
+        editingItem={editingCardItem}
         lang={lang}
         initialTab={addModalInitialTab}
       />
@@ -1076,6 +1459,13 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onSignOut }) =
         bankCardsCount={bankCards.length}
         mobileWalletsCount={mobileWallets.length}
         identitiesCount={identities.length}
+        userProfile={userProfile}
+        onUpdateProfile={(profile) => {
+          setUserProfile(profile);
+          showToast(lang === 'sw' ? 'Wasifu umehifadhiwa!' : 'Profile updated!');
+        }}
+        hasVaultPin={Boolean(vaultPinHash)}
+        firebaseUserEmail={firebaseUser?.email || null}
       />
 
       {/* Native Bottom Navigation Bar */}

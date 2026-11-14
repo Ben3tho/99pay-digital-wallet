@@ -1,0 +1,114 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Hardened reusable primitives
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Validation blueprint: UserProfileDoc
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['ownerId', 'fullName', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'fullName', 'phoneNumber', 'email', 'createdAt', 'updatedAt'])
+        && data.ownerId is string
+        && data.ownerId == request.auth.uid
+        && isValidId(data.ownerId)
+        && data.fullName is string
+        && data.fullName.size() <= 120
+        && (!('phoneNumber' in data) || (data.phoneNumber is string && data.phoneNumber.size() <= 32))
+        && (!('email' in data) || (data.email is string && data.email.size() <= 160))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Validation blueprint: EncryptedVaultDoc
+    function isValidEncryptedVault(data) {
+      return data.keys().hasAll(['ownerId', 'vaultFormat', 'ciphertext', 'itemCount', 'hasPinWrap', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'vaultFormat', 'ciphertext', 'itemCount', 'hasPinWrap', 'createdAt', 'updatedAt'])
+        && data.ownerId is string
+        && data.ownerId == request.auth.uid
+        && isValidId(data.ownerId)
+        && data.vaultFormat is string
+        && data.vaultFormat == '99PAY_CLOUD_AESGCM_V1'
+        && data.ciphertext is string
+        && data.ciphertext.size() >= 16
+        && data.ciphertext.size() <= 750000
+        && data.itemCount is int
+        && data.itemCount >= 0
+        && data.itemCount <= 10000
+        && data.hasPinWrap is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    match /users/{userId} {
+      // Strictly prohibit collection scraping
+      allow list: if false;
+
+      allow get: if isValidId(userId) && isOwner(userId);
+
+      allow create: if isValidId(userId)
+        && isOwner(userId)
+        && isValidUserProfile(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isValidId(userId)
+        && isOwner(userId)
+        && isValidUserProfile(incoming())
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['fullName', 'phoneNumber', 'email', 'updatedAt']);
+
+      allow delete: if isValidId(userId) && isOwner(userId);
+
+      match /vault/{vaultId} {
+        allow list: if isOwner(userId) && existing().ownerId == request.auth.uid;
+
+        allow get: if isValidId(userId) && isValidId(vaultId) && isOwner(userId);
+
+        allow create: if isValidId(userId)
+          && isValidId(vaultId)
+          && vaultId == 'main'
+          && isOwner(userId)
+          && isValidEncryptedVault(incoming())
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+
+        allow update: if isValidId(userId)
+          && isValidId(vaultId)
+          && vaultId == 'main'
+          && isOwner(userId)
+          && isValidEncryptedVault(incoming())
+          && incoming().ownerId == existing().ownerId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['vaultFormat', 'ciphertext', 'itemCount', 'hasPinWrap', 'updatedAt']);
+
+        allow delete: if isValidId(userId) && isValidId(vaultId) && isOwner(userId);
+      }
+    }
+  }
+}

@@ -7,23 +7,28 @@ import {
   Check,
   GraduationCap,
   Fuel,
-  ExternalLink,
+  Trash2,
+  Pencil,
 } from 'lucide-react';
 import { PensionLoyaltyItem } from '../../data/walletData';
-import { Language, TRANSLATIONS } from '../../i18n/translations';
+import { Language } from '../../i18n/translations';
+import { launchUssdDialer } from '../../utils/ussd';
 
 interface PensionLoyaltyCardProps {
   item: PensionLoyaltyItem;
   lang: Language;
   onCopy: (text: string, label: string) => void;
+  onEdit?: (item: PensionLoyaltyItem) => void;
+  onDelete?: (id: string) => void;
 }
 
 export const PensionLoyaltyCard: React.FC<PensionLoyaltyCardProps> = ({
   item,
   lang,
   onCopy,
+  onEdit,
+  onDelete,
 }) => {
-  const t = TRANSLATIONS[lang];
   const [copied, setCopied] = useState(false);
 
   const getIcon = (type: PensionLoyaltyItem['categoryType']) => {
@@ -48,9 +53,8 @@ export const PensionLoyaltyCard: React.FC<PensionLoyaltyCardProps> = ({
 
   const handleDialUssd = () => {
     if (item.ussdCheckCode) {
-      const encoded = `tel:${item.ussdCheckCode.replace(/#/g, '%23')}`;
-      onCopy(item.ussdCheckCode, `USSD Code: ${item.ussdCheckCode}`);
-      window.location.href = encoded;
+      const launched = launchUssdDialer(item.ussdCheckCode);
+      onCopy(launched || item.ussdCheckCode, `USSD Code: ${launched || item.ussdCheckCode}`);
     }
   };
 
@@ -78,9 +82,33 @@ export const PensionLoyaltyCard: React.FC<PensionLoyaltyCardProps> = ({
           </div>
         </div>
 
-        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-[#0B211B] border border-[#24473A] text-[#00B887]">
-          {item.categoryType}
-        </span>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-[#0B211B] border border-[#24473A] text-[#00B887]">
+            {item.categoryType}
+          </span>
+          {onEdit && (
+            <button
+              type="button"
+              onClick={() => onEdit(item)}
+              aria-label="Edit pension or loyalty card"
+              className="p-1.5 rounded-lg bg-[#0B211B] border border-[#24473A] hover:border-[#00B887] text-[#B7C8C1] hover:text-[#00B887] transition-colors cursor-pointer"
+              title={lang === 'sw' ? 'Hariri kadi' : 'Edit card'}
+            >
+              <Pencil className="w-3.5 h-3.5" />
+            </button>
+          )}
+          {onDelete && (
+            <button
+              type="button"
+              onClick={() => onDelete(item.id)}
+              aria-label="Delete pension or loyalty card"
+              className="p-1.5 rounded-lg bg-[#0B211B] border border-[#24473A] hover:border-rose-500/60 text-[#B7C8C1] hover:text-rose-400 transition-colors cursor-pointer"
+              title={lang === 'sw' ? 'Futa kadi' : 'Delete card'}
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Member details */}

@@ -9,6 +9,7 @@ import {
   Plus,
   CheckCircle2,
   ScanLine,
+  Award,
 } from 'lucide-react';
 import {
   BankCardItem,
@@ -16,6 +17,7 @@ import {
   MobileMoneyItem,
   IdentityDocItem,
   InsuranceDocItem,
+  PensionLoyaltyItem,
 } from '../../data/walletData';
 import {
   CardBrand,
@@ -28,8 +30,16 @@ import {
 } from '../../utils/cardDetection';
 import { CardBrandLogo } from './CardBrandLogo';
 import { Language } from '../../i18n/translations';
+import { isEncryptedEnvelope } from '../../utils/vaultSecurity';
 
-export type AddModalTab = 'bank' | 'momo' | 'id' | 'insurance';
+export type AddModalTab = 'bank' | 'momo' | 'id' | 'insurance' | 'pension';
+
+export type EditingCardItem =
+  | { type: 'bank'; item: BankCardItem }
+  | { type: 'momo'; item: MobileMoneyItem }
+  | { type: 'id'; item: IdentityDocItem }
+  | { type: 'insurance'; item: InsuranceDocItem }
+  | { type: 'pension'; item: PensionLoyaltyItem };
 
 interface AddCardModalProps {
   isOpen: boolean;
@@ -38,6 +48,13 @@ interface AddCardModalProps {
   onAddMobileMoney: (wallet: MobileMoneyItem) => void;
   onAddIdentity: (doc: IdentityDocItem) => void;
   onAddInsurance: (ins: InsuranceDocItem) => void;
+  onAddPension: (pen: PensionLoyaltyItem) => void;
+  onUpdateBankCard?: (card: BankCardItem) => void;
+  onUpdateMobileMoney?: (wallet: MobileMoneyItem) => void;
+  onUpdateIdentity?: (doc: IdentityDocItem) => void;
+  onUpdateInsurance?: (ins: InsuranceDocItem) => void;
+  onUpdatePension?: (pen: PensionLoyaltyItem) => void;
+  editingItem?: EditingCardItem | null;
   lang?: Language;
   initialTab?: AddModalTab;
 }
@@ -49,18 +66,17 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({
   onAddMobileMoney,
   onAddIdentity,
   onAddInsurance,
+  onAddPension,
+  onUpdateBankCard,
+  onUpdateMobileMoney,
+  onUpdateIdentity,
+  onUpdateInsurance,
+  onUpdatePension,
+  editingItem = null,
   lang = 'sw',
   initialTab = 'bank',
 }) => {
   const [activeTab, setActiveTab] = useState<AddModalTab>(initialTab);
-
-  // Sync tab when modal opens
-  useEffect(() => {
-    if (isOpen) {
-      setActiveTab(initialTab);
-      setError(null);
-    }
-  }, [isOpen, initialTab]);
 
   // Bank Form States
   const [bankName, setBankName] = useState<BankInstitution>('CRDB Bank');
@@ -84,6 +100,7 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({
   );
   const [idNumber, setIdNumber] = useState('');
   const [idFullName, setIdFullName] = useState('');
+  const [idExpiryDate, setIdExpiryDate] = useState('');
 
   // Insurance Form States
   const [insProvider, setInsProvider] = useState<
@@ -92,7 +109,85 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({
   const [insNumber, setInsNumber] = useState('');
   const [insMember, setInsMember] = useState('');
 
+  // Pension / Loyalty Form States
+  const [penType, setPenType] = useState<PensionLoyaltyItem['categoryType']>('NSSF');
+  const [penTitle, setPenTitle] = useState('');
+  const [penNumber, setPenNumber] = useState('');
+  const [penHolder, setPenHolder] = useState('');
+  const [penOrg, setPenOrg] = useState('');
+  const [penStatus, setPenStatus] = useState('');
+
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setError(null);
+    if (!editingItem) {
+      setActiveTab(initialTab);
+      setBankName('CRDB Bank');
+      setCustomBankName('');
+      setCardType('Card');
+      setIsManualBrandOverride(false);
+      setCardholderName('');
+      setCardNumber('');
+      setExpiry('');
+      setMomoProvider('Vodacom M-Pesa');
+      setMomoName('');
+      setMomoPhone('');
+      setIdType('NIDA National ID');
+      setIdNumber('');
+      setIdFullName('');
+      setIdExpiryDate('');
+      setInsProvider('NHIF');
+      setInsNumber('');
+      setInsMember('');
+      setPenType('NSSF');
+      setPenTitle('');
+      setPenNumber('');
+      setPenHolder('');
+      setPenOrg('');
+      setPenStatus('');
+      return;
+    }
+
+    setActiveTab(editingItem.type);
+    if (editingItem.type === 'bank') {
+      const c = editingItem.item;
+      setBankName(c.bankName);
+      setCustomBankName(c.customBankName || '');
+      setCardType(c.cardType);
+      setIsManualBrandOverride(true);
+      setCardholderName(c.cardholderName);
+      const rawFull = c.fullNumber && !isEncryptedEnvelope(c.fullNumber) ? c.fullNumber : '';
+      setCardNumber(rawFull);
+      setExpiry(c.expiryDate);
+    } else if (editingItem.type === 'momo') {
+      const m = editingItem.item;
+      setMomoProvider(m.provider);
+      setMomoName(m.accountHolder);
+      setMomoPhone(m.phoneNumber);
+    } else if (editingItem.type === 'id') {
+      const d = editingItem.item;
+      setIdType(d.docType);
+      setIdFullName(d.fullName);
+      const rawDoc = !isEncryptedEnvelope(d.documentNumber) ? d.documentNumber : '';
+      setIdNumber(rawDoc);
+      setIdExpiryDate(d.expiryDate || '');
+    } else if (editingItem.type === 'insurance') {
+      const ins = editingItem.item;
+      setInsProvider(ins.provider);
+      setInsMember(ins.beneficiaryName);
+      setInsNumber(ins.membershipNumber);
+    } else if (editingItem.type === 'pension') {
+      const p = editingItem.item;
+      setPenType(p.categoryType);
+      setPenTitle(p.title);
+      setPenNumber(p.membershipNumber);
+      setPenHolder(p.holderName);
+      setPenOrg(p.organization);
+      setPenStatus(p.expiryOrStatus || '');
+    }
+  }, [isOpen, initialTab, editingItem]);
 
   if (!isOpen) return null;
 
@@ -102,7 +197,6 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({
   const brandMeta = getCardBrandMeta(activeBrand);
   const isLuhnValid = digitsOnly.length >= 12 ? luhnCheck(digitsOnly) : null;
 
-  // Live BIN detection + formatting as user types
   const handleCardNumberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const rawDigits = e.target.value.replace(/\D/g, '');
     const autoBrand = detectCardBrand(rawDigits);
@@ -129,7 +223,6 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({
     }
   };
 
-  // Real-time Expiry Formatter (MM/YY)
   const handleExpiryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     let raw = e.target.value.replace(/\D/g, '').slice(0, 4);
     if (raw.length >= 3) {
@@ -172,8 +265,17 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({
         return;
       }
 
+      const isEditingExistingBank = editingItem?.type === 'bank';
       const minReqDigits = activeBrand === 'Diners Club' ? 14 : activeBrand === 'American Express' ? 15 : 12;
-      if (digitsOnly.length < minReqDigits) {
+      if (digitsOnly.length > 0 && digitsOnly.length < minReqDigits) {
+        setError(
+          lang === 'sw'
+            ? `Namba ya kadi ya ${activeBrand === 'Card' ? 'benki' : activeBrand} lazima iwe na angalau tarakimu ${minReqDigits}.`
+            : `${activeBrand === 'Card' ? 'Card' : activeBrand} number must be at least ${minReqDigits} digits.`
+        );
+        return;
+      }
+      if (!isEditingExistingBank && digitsOnly.length < minReqDigits) {
         setError(
           lang === 'sw'
             ? `Namba ya kadi ya ${activeBrand === 'Card' ? 'benki' : activeBrand} lazima iwe na angalau tarakimu ${minReqDigits}.`
@@ -184,7 +286,7 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({
 
       let cleanExpiry = expiry.trim();
       if (!cleanExpiry) {
-        cleanExpiry = '12/29';
+        cleanExpiry = isEditingExistingBank ? editingItem.item.expiryDate : '12/29';
       } else {
         const expDigits = cleanExpiry.replace(/\D/g, '');
         if (expDigits.length >= 2) {
@@ -206,8 +308,18 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({
 
       const finalBrand: CardBrand =
         isManualBrandOverride ? cardType : detectCardBrand(digitsOnly);
-      const masked = maskCardNumber(digitsOnly, finalBrand);
-      const formattedFull = formatCardNumber(digitsOnly, finalBrand);
+      const masked =
+        digitsOnly.length >= minReqDigits
+          ? maskCardNumber(digitsOnly, finalBrand)
+          : isEditingExistingBank
+          ? editingItem.item.maskedNumber
+          : '';
+      const formattedFull =
+        digitsOnly.length >= minReqDigits
+          ? formatCardNumber(digitsOnly, finalBrand)
+          : isEditingExistingBank
+          ? editingItem.item.fullNumber
+          : undefined;
 
       const schemeMap: Record<BankInstitution, BankCardItem['colorScheme']> = {
         'CRDB Bank': 'emerald',
@@ -232,8 +344,8 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({
           ? 'Platinum Charge Card'
           : `${finalBrand} Debit / Credit`;
 
-      onAddBankCard({
-        id: `card-${Date.now()}`,
+      const cardPayload: BankCardItem = {
+        id: isEditingExistingBank ? editingItem.item.id : `card-${Date.now()}`,
         bankName,
         customBankName: bankName === 'Other Bank' ? customBankName.trim() : undefined,
         cardType: finalBrand,
@@ -243,8 +355,14 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({
         fullNumber: formattedFull,
         expiryDate: cleanExpiry,
         colorScheme: schemeMap[bankName] || 'darkEmerald',
-        isDefault: true,
-      });
+        isDefault: isEditingExistingBank ? editingItem.item.isDefault : true,
+      };
+
+      if (isEditingExistingBank && onUpdateBankCard) {
+        onUpdateBankCard(cardPayload);
+      } else {
+        onAddBankCard(cardPayload);
+      }
 
       resetBankForm();
       onClose();
@@ -262,8 +380,8 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({
       if (cleanPhone.replace(/\D/g, '').length < 9) {
         setError(
           lang === 'sw'
-            ? 'Tafadhali ingiza namba kamili ya simu (mf. 0744 123 456).'
-            : 'Please enter a valid phone number (e.g. 0744 123 456).'
+            ? 'Tafadhali ingiza namba kamili ya simu (mf. 07XX XXX XXX).'
+            : 'Please enter a valid phone number (e.g. 07XX XXX XXX).'
         );
         return;
       }
@@ -282,8 +400,9 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({
         Halopesa: '#FF6F00',
       };
 
-      onAddMobileMoney({
-        id: `momo-${Date.now()}`,
+      const isEditingMomo = editingItem?.type === 'momo';
+      const momoPayload: MobileMoneyItem = {
+        id: isEditingMomo ? editingItem.item.id : `momo-${Date.now()}`,
         provider: momoProvider,
         accountHolder: cleanName,
         phoneNumber: cleanPhone.startsWith('+')
@@ -291,8 +410,14 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({
           : `+255 ${cleanPhone.replace(/^0/, '')}`,
         ussdCode: ussdMap[momoProvider] || '*150#',
         brandColor: colorMap[momoProvider] || '#00B887',
-        isPrimary: true,
-      });
+        isPrimary: isEditingMomo ? editingItem.item.isPrimary : true,
+      };
+
+      if (isEditingMomo && onUpdateMobileMoney) {
+        onUpdateMobileMoney(momoPayload);
+      } else {
+        onAddMobileMoney(momoPayload);
+      }
 
       setMomoName('');
       setMomoPhone('');
@@ -300,7 +425,8 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({
     } else if (activeTab === 'id') {
       const cleanName = idFullName.trim();
       const cleanNumber = idNumber.trim();
-      if (!cleanName || !cleanNumber) {
+      const isEditingId = editingItem?.type === 'id';
+      if (!cleanName || (!cleanNumber && !isEditingId)) {
         setError(
           lang === 'sw'
             ? 'Tafadhali ingiza jina kamili na namba ya kitambulisho.'
@@ -309,22 +435,32 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({
         return;
       }
 
-      onAddIdentity({
-        id: `id-${Date.now()}`,
+      const idPayload: IdentityDocItem = {
+        id: isEditingId ? editingItem.item.id : `id-${Date.now()}`,
         docType: idType,
         fullName: cleanName.toUpperCase(),
-        documentNumber: cleanNumber,
-        issueDate: new Date().toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }),
+        documentNumber: cleanNumber || (isEditingId ? editingItem.item.documentNumber : ''),
+        issueDate: isEditingId
+          ? editingItem.item.issueDate
+          : new Date().toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }),
+        expiryDate: idExpiryDate.trim() || undefined,
         issuingAuthority:
           idType === 'NIDA National ID'
             ? 'NIDA Tanzania'
             : idType === "Driver's License"
             ? 'TRA / LATRA'
             : 'NEC Tanzania',
-      });
+      };
+
+      if (isEditingId && onUpdateIdentity) {
+        onUpdateIdentity(idPayload);
+      } else {
+        onAddIdentity(idPayload);
+      }
 
       setIdFullName('');
       setIdNumber('');
+      setIdExpiryDate('');
       onClose();
     } else if (activeTab === 'insurance') {
       const cleanNumber = insNumber.trim();
@@ -338,17 +474,79 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({
         return;
       }
 
-      onAddInsurance({
-        id: `ins-${Date.now()}`,
+      const isEditingIns = editingItem?.type === 'insurance';
+      const insPayload: InsuranceDocItem = {
+        id: isEditingIns ? editingItem.item.id : `ins-${Date.now()}`,
         provider: insProvider,
         schemeName: lang === 'sw' ? 'Bima ya Afya (Personal Cover)' : 'Health Insurance Cover',
         membershipNumber: cleanNumber,
         beneficiaryName: cleanMember.toUpperCase(),
         status: 'Active',
-      });
+      };
+
+      if (isEditingIns && onUpdateInsurance) {
+        onUpdateInsurance(insPayload);
+      } else {
+        onAddInsurance(insPayload);
+      }
 
       setInsNumber('');
       setInsMember('');
+      onClose();
+    } else if (activeTab === 'pension') {
+      const cleanNumber = penNumber.trim();
+      const cleanHolder = penHolder.trim();
+      if (!cleanNumber || !cleanHolder) {
+        setError(
+          lang === 'sw'
+            ? 'Tafadhali ingiza namba ya uanachama na jina la mwenye kadi.'
+            : 'Please enter membership number and cardholder name.'
+        );
+        return;
+      }
+
+      const defaultTitle =
+        penType === 'NSSF'
+          ? 'NSSF Social Security'
+          : penType === 'PSSSF'
+          ? 'PSSSF Pension Fund'
+          : penType === 'Fuel Loyalty'
+          ? 'Fuel Loyalty Card'
+          : 'Student / Institution ID';
+
+      const accent =
+        penType === 'NSSF'
+          ? '#008751'
+          : penType === 'PSSSF'
+          ? '#0284C7'
+          : penType === 'Fuel Loyalty'
+          ? '#EA580C'
+          : '#1E3A8A';
+
+      const isEditingPen = editingItem?.type === 'pension';
+      const penPayload: PensionLoyaltyItem = {
+        id: isEditingPen ? editingItem.item.id : `pen-${Date.now()}`,
+        categoryType: penType,
+        title: penTitle.trim() || defaultTitle,
+        membershipNumber: cleanNumber,
+        holderName: cleanHolder.toUpperCase(),
+        organization: penOrg.trim() || penType,
+        ussdCheckCode: penType === 'NSSF' ? '*152*00#' : undefined,
+        expiryOrStatus: penStatus.trim() || (lang === 'sw' ? 'Inatumika (Active)' : 'Active'),
+        accentColor: accent,
+      };
+
+      if (isEditingPen && onUpdatePension) {
+        onUpdatePension(penPayload);
+      } else {
+        onAddPension(penPayload);
+      }
+
+      setPenTitle('');
+      setPenNumber('');
+      setPenHolder('');
+      setPenOrg('');
+      setPenStatus('');
       onClose();
     }
   };
@@ -370,7 +568,13 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({
             </div>
             <div>
               <h3 className="font-bold text-base text-white tracking-tight">
-                {lang === 'sw' ? 'Ongeza Kadi au Hati' : 'Add Card or Document'}
+                {editingItem
+                  ? lang === 'sw'
+                    ? 'Hariri Taarifa za Vault'
+                    : 'Edit Vault Item'
+                  : lang === 'sw'
+                  ? 'Ongeza Kadi au Hati'
+                  : 'Add Card or Document'}
               </h3>
               <p className="text-[10px] text-[#B7C8C1]">
                 {lang === 'sw'
@@ -389,15 +593,16 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({
           </button>
         </div>
 
-        {/* Category Tabs */}
-        <div className="grid grid-cols-4 gap-1 p-1 bg-[#0B211B] rounded-xl my-3 border border-[#24473A]">
+        {/* Category Tabs (hidden while editing existing item) */}
+        {!editingItem && (
+        <div className="flex items-center gap-1 p-1 bg-[#0B211B] rounded-xl my-3 border border-[#24473A] overflow-x-auto scrollbar-none">
           <button
             type="button"
             onClick={() => {
               setActiveTab('bank');
               setError(null);
             }}
-            className={`py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition-all cursor-pointer ${
+            className={`py-2 px-2.5 rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1 transition-all cursor-pointer shrink-0 ${
               activeTab === 'bank' ? 'bg-[#00B887] text-[#03120E] shadow-sm' : 'text-[#B7C8C1] hover:text-white'
             }`}
           >
@@ -410,7 +615,7 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({
               setActiveTab('momo');
               setError(null);
             }}
-            className={`py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition-all cursor-pointer ${
+            className={`py-2 px-2.5 rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1 transition-all cursor-pointer shrink-0 ${
               activeTab === 'momo' ? 'bg-[#00B887] text-[#03120E] shadow-sm' : 'text-[#B7C8C1] hover:text-white'
             }`}
           >
@@ -423,7 +628,7 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({
               setActiveTab('id');
               setError(null);
             }}
-            className={`py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition-all cursor-pointer ${
+            className={`py-2 px-2.5 rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1 transition-all cursor-pointer shrink-0 ${
               activeTab === 'id' ? 'bg-[#00B887] text-[#03120E] shadow-sm' : 'text-[#B7C8C1] hover:text-white'
             }`}
           >
@@ -436,7 +641,7 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({
               setActiveTab('insurance');
               setError(null);
             }}
-            className={`py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition-all cursor-pointer ${
+            className={`py-2 px-2.5 rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1 transition-all cursor-pointer shrink-0 ${
               activeTab === 'insurance'
                 ? 'bg-[#00B887] text-[#03120E] shadow-sm'
                 : 'text-[#B7C8C1] hover:text-white'
@@ -445,7 +650,23 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({
             <HeartPulse className="w-3.5 h-3.5" />
             <span>NHIF</span>
           </button>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('pension');
+              setError(null);
+            }}
+            className={`py-2 px-2.5 rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1 transition-all cursor-pointer shrink-0 ${
+              activeTab === 'pension'
+                ? 'bg-[#00B887] text-[#03120E] shadow-sm'
+                : 'text-[#B7C8C1] hover:text-white'
+            }`}
+          >
+            <Award className="w-3.5 h-3.5" />
+            <span>{lang === 'sw' ? 'Mifuko' : 'Pension'}</span>
+          </button>
         </div>
+        )}
 
         {/* Security Rule Callout */}
         <div className="p-2.5 rounded-xl bg-[#0B211B] border border-[#24473A] mb-3 text-[11px] text-[#B7C8C1] flex items-center gap-2">
@@ -461,7 +682,6 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({
         <form onSubmit={handleSubmit} className="overflow-y-auto space-y-3 flex-1 pr-0.5">
           {activeTab === 'bank' && (
             <>
-              {/* Live Card Brand Detection Preview Bar */}
               <div className="p-3 rounded-2xl bg-gradient-to-br from-[#0B211B] to-[#03120E] border border-[#24473A] flex items-center justify-between gap-2">
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5">
@@ -497,8 +717,8 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({
                             ? 'Namba Sahihi'
                             : 'Valid Checksum'
                           : lang === 'sw'
-                          ? 'Namba ya Majaribio'
-                          : 'Test / Custom'}
+                          ? 'Kagua Namba'
+                          : 'Check Digits'}
                       </span>
                     )}
                   </div>
@@ -556,7 +776,7 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({
                 </label>
                 <input
                   type="text"
-                  placeholder="Mf. JOSEPH B. MLAY"
+                  placeholder={lang === 'sw' ? 'Andika jina kwenye kadi' : 'Name printed on card'}
                   value={cardholderName}
                   onChange={(e) => {
                     setCardholderName(e.target.value);
@@ -575,11 +795,7 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({
                     type="text"
                     inputMode="numeric"
                     maxLength={23}
-                    placeholder={
-                      activeBrand === 'American Express'
-                        ? '3782 822463 10005'
-                        : '4192 0000 0000 1234'
-                    }
+                    placeholder={lang === 'sw' ? 'Namba ya kadi' : 'Card number'}
                     value={cardNumber}
                     onChange={handleCardNumberChange}
                     className="w-full h-11 px-3 rounded-xl bg-[#0B211B] border border-[#24473A] text-white text-sm font-mono focus:outline-none focus:border-[#00B887]"
@@ -591,7 +807,7 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({
                     type="text"
                     inputMode="numeric"
                     maxLength={5}
-                    placeholder="08/29"
+                    placeholder="MM/YY"
                     value={expiry}
                     onChange={handleExpiryChange}
                     className="w-full h-11 px-3 rounded-xl bg-[#0B211B] border border-[#24473A] text-white text-sm font-mono focus:outline-none focus:border-[#00B887]"
@@ -599,7 +815,6 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({
                 </div>
               </div>
 
-              {/* Manual Brand Override Strip (if user wants to override auto-detection) */}
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="text-[11px] text-[#B7C8C1]">
@@ -641,7 +856,10 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({
                   })}
                 </div>
                 <span className="text-[10px] text-[#B7C8C1]/60 block mt-0.5">
-                  BIN range: {brandMeta.minLength === brandMeta.maxLength ? `${brandMeta.minLength}` : `${brandMeta.minLength}-${brandMeta.maxLength}`}{' '}
+                  BIN range:{' '}
+                  {brandMeta.minLength === brandMeta.maxLength
+                    ? `${brandMeta.minLength}`
+                    : `${brandMeta.minLength}-${brandMeta.maxLength}`}{' '}
                   {lang === 'sw' ? 'tarakimu' : 'digits'}
                 </span>
               </div>
@@ -672,7 +890,7 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({
                 </label>
                 <input
                   type="text"
-                  placeholder="Mf. Joseph Benedicto Mlay"
+                  placeholder={lang === 'sw' ? 'Andika jina lililosajiliwa' : 'Registered account name'}
                   value={momoName}
                   onChange={(e) => {
                     setMomoName(e.target.value);
@@ -688,7 +906,7 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({
                 </label>
                 <input
                   type="tel"
-                  placeholder="Mf. 0744 123 456"
+                  placeholder="07XX XXX XXX"
                   value={momoPhone}
                   onChange={(e) => {
                     setMomoPhone(e.target.value);
@@ -723,7 +941,7 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({
                 </label>
                 <input
                   type="text"
-                  placeholder="Mf. JOSEPH BENEDICTO MLAY"
+                  placeholder={lang === 'sw' ? 'Jina kamili kwenye hati' : 'Full name on document'}
                   value={idFullName}
                   onChange={(e) => {
                     setIdFullName(e.target.value);
@@ -739,12 +957,31 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({
                 </label>
                 <input
                   type="text"
-                  placeholder="Mf. 19920815-14102-00001-26"
+                  placeholder={
+                    editingItem?.type === 'id' && isEncryptedEnvelope(editingItem.item.documentNumber)
+                      ? lang === 'sw'
+                        ? 'Imefungwa kwa PIN — weka mpya kubadilisha'
+                        : 'PIN locked — enter new to replace'
+                      : 'YYYYMMDD-XXXXX-XXXXX-XX'
+                  }
                   value={idNumber}
                   onChange={(e) => {
                     setIdNumber(e.target.value);
                     if (error) setError(null);
                   }}
+                  className="w-full h-11 px-3 rounded-xl bg-[#0B211B] border border-[#24473A] text-white text-sm font-mono focus:outline-none focus:border-[#00B887]"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-[#B7C8C1] block mb-1">
+                  {lang === 'sw' ? 'Tarehe ya Kuisha (Hiari: YYYY-MM-DD)' : 'Expiry Date (Optional: YYYY-MM-DD)'}
+                </label>
+                <input
+                  type="text"
+                  placeholder="2028-12-31 au 12/28"
+                  value={idExpiryDate}
+                  onChange={(e) => setIdExpiryDate(e.target.value)}
                   className="w-full h-11 px-3 rounded-xl bg-[#0B211B] border border-[#24473A] text-white text-sm font-mono focus:outline-none focus:border-[#00B887]"
                 />
               </div>
@@ -791,13 +1028,105 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({
                 </label>
                 <input
                   type="text"
-                  placeholder="Mf. 10-2948194-0"
+                  placeholder={lang === 'sw' ? 'Namba ya kadi ya bima' : 'Membership number'}
                   value={insNumber}
                   onChange={(e) => {
                     setInsNumber(e.target.value);
                     if (error) setError(null);
                   }}
                   className="w-full h-11 px-3 rounded-xl bg-[#0B211B] border border-[#24473A] text-white text-sm font-mono focus:outline-none focus:border-[#00B887]"
+                />
+              </div>
+            </>
+          )}
+
+          {activeTab === 'pension' && (
+            <>
+              <div>
+                <label className="text-xs text-[#B7C8C1] block mb-1">
+                  {lang === 'sw' ? 'Aina ya Mfuko / Klabu' : 'Membership Category'}
+                </label>
+                <select
+                  value={penType}
+                  onChange={(e) => setPenType(e.target.value as PensionLoyaltyItem['categoryType'])}
+                  className="w-full h-11 px-3 rounded-xl bg-[#0B211B] border border-[#24473A] text-white text-sm focus:outline-none focus:border-[#00B887]"
+                >
+                  <option value="NSSF">NSSF (Hifadhi ya Jamii)</option>
+                  <option value="PSSSF">PSSSF (Mfuko wa Pensheni)</option>
+                  <option value="Fuel Loyalty">Fuel Loyalty / Rewards Card</option>
+                  <option value="University ID">Student / Institution ID</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs text-[#B7C8C1] block mb-1">
+                  {lang === 'sw' ? 'Jina la Mwanachama' : 'Member Full Name'}
+                </label>
+                <input
+                  type="text"
+                  placeholder={lang === 'sw' ? 'Jina kamili' : 'Full name'}
+                  value={penHolder}
+                  onChange={(e) => {
+                    setPenHolder(e.target.value);
+                    if (error) setError(null);
+                  }}
+                  className="w-full h-11 px-3 rounded-xl bg-[#0B211B] border border-[#24473A] text-white text-sm focus:outline-none focus:border-[#00B887]"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-[#B7C8C1] block mb-1">
+                  {lang === 'sw' ? 'Namba ya Uanachama' : 'Membership / Registration #'}
+                </label>
+                <input
+                  type="text"
+                  placeholder={lang === 'sw' ? 'Namba ya mwanachama' : 'Membership number'}
+                  value={penNumber}
+                  onChange={(e) => {
+                    setPenNumber(e.target.value);
+                    if (error) setError(null);
+                  }}
+                  className="w-full h-11 px-3 rounded-xl bg-[#0B211B] border border-[#24473A] text-white text-sm font-mono focus:outline-none focus:border-[#00B887]"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs text-[#B7C8C1] block mb-1">
+                    {lang === 'sw' ? 'Kichwa (Hiari)' : 'Card Title (Opt.)'}
+                  </label>
+                  <input
+                    type="text"
+                    placeholder={penType}
+                    value={penTitle}
+                    onChange={(e) => setPenTitle(e.target.value)}
+                    className="w-full h-11 px-3 rounded-xl bg-[#0B211B] border border-[#24473A] text-white text-xs focus:outline-none focus:border-[#00B887]"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-[#B7C8C1] block mb-1">
+                    {lang === 'sw' ? 'Taasisi (Hiari)' : 'Organization (Opt.)'}
+                  </label>
+                  <input
+                    type="text"
+                    placeholder={lang === 'sw' ? 'Jina la taasisi' : 'Organization'}
+                    value={penOrg}
+                    onChange={(e) => setPenOrg(e.target.value)}
+                    className="w-full h-11 px-3 rounded-xl bg-[#0B211B] border border-[#24473A] text-white text-xs focus:outline-none focus:border-[#00B887]"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs text-[#B7C8C1] block mb-1">
+                  {lang === 'sw' ? 'Hali / Alama (Hiari)' : 'Status / Expiry (Optional)'}
+                </label>
+                <input
+                  type="text"
+                  placeholder={lang === 'sw' ? 'Mf. Inatumika (Active)' : 'e.g. Active'}
+                  value={penStatus}
+                  onChange={(e) => setPenStatus(e.target.value)}
+                  className="w-full h-11 px-3 rounded-xl bg-[#0B211B] border border-[#24473A] text-white text-xs focus:outline-none focus:border-[#00B887]"
                 />
               </div>
             </>
@@ -817,7 +1146,13 @@ export const AddCardModal: React.FC<AddCardModalProps> = ({
             >
               <CheckCircle2 className="w-4 h-4 stroke-[2.5]" />
               <span>
-                {lang === 'sw' ? 'Hifadhi kwenye 99Pay Vault' : 'Save to 99Pay Vault'}
+                {editingItem
+                  ? lang === 'sw'
+                    ? 'Hifadhi Mabadiliko'
+                    : 'Save Changes'
+                  : lang === 'sw'
+                  ? 'Hifadhi kwenye 99Pay Vault'
+                  : 'Save to 99Pay Vault'}
               </span>
             </button>
           </div>

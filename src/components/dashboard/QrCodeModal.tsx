@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { X, QrCode, Copy, Check, Download, Share2 } from 'lucide-react';
+import QRCode from 'qrcode';
 import { LipaMerchantItem } from '../../data/walletData';
 
 interface QrCodeModalProps {
@@ -9,18 +10,97 @@ interface QrCodeModalProps {
 }
 
 export const QrCodeModal: React.FC<QrCodeModalProps> = ({ merchant, isOpen, onClose }) => {
-  const [copied, setCopied] = React.useState(false);
+  const [copied, setCopied] = useState(false);
+  const [qrMode, setQrMode] = useState<'number' | 'details'>('number');
+  const [qrDataUrl, setQrDataUrl] = useState<string>('');
+  const [qrError, setQrError] = useState<string | null>(null);
+
+  const qrPayload = merchant
+    ? qrMode === 'number'
+      ? merchant.number
+      : JSON.stringify({
+          app: '99Pay',
+          merchant: merchant.merchantName,
+          provider: merchant.provider,
+          type: merchant.merchantType,
+          till: merchant.number,
+          ussd: merchant.ussdPrefix,
+        })
+    : '';
+
+  useEffect(() => {
+    let active = true;
+    if (!isOpen || !merchant || !qrPayload) {
+      setQrDataUrl('');
+      return;
+    }
+
+    QRCode.toDataURL(qrPayload, {
+      width: 320,
+      margin: 2,
+      errorCorrectionLevel: 'M',
+      color: {
+        dark: '#03120E',
+        light: '#FFFFFF',
+      },
+    })
+      .then((url) => {
+        if (active) {
+          setQrDataUrl(url);
+          setQrError(null);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setQrError('Imeshindikana kutengeneza picha ya QR.');
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [isOpen, merchant, qrPayload]);
 
   if (!isOpen || !merchant) return null;
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(merchant.number);
+    navigator.clipboard?.writeText(merchant.number);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const handleDownloadQr = () => {
+    if (!qrDataUrl) return;
+    const anchor = document.createElement('a');
+    anchor.href = qrDataUrl;
+    const safeName = merchant.merchantName.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    anchor.download = `99pay-qr-${safeName}-${merchant.number}.png`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  };
+
+  const handleShare = async () => {
+    const text = `${merchant.merchantName} (${merchant.provider} ${merchant.merchantType}): ${merchant.number}`;
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: `Lipa Namba - ${merchant.merchantName}`,
+          text,
+        });
+        return;
+      } catch {
+        // Fallback to copy if share dismissed
+      }
+    }
+    handleCopy();
+  };
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200"
+      onClick={onClose}
+    >
       <div
         className="w-full max-w-sm bg-[#06271D] border border-[#24473A] rounded-2xl shadow-2xl p-5 flex flex-col items-center text-center relative"
         onClick={(e) => e.stopPropagation()}
@@ -28,79 +108,61 @@ export const QrCodeModal: React.FC<QrCodeModalProps> = ({ merchant, isOpen, onCl
         <button
           type="button"
           onClick={onClose}
-          className="absolute top-4 right-4 w-8 h-8 rounded-full bg-[#0B211B] border border-[#24473A] flex items-center justify-center text-[#B7C8C1] hover:text-white"
+          aria-label="Close QR modal"
+          className="absolute top-4 right-4 w-8 h-8 rounded-full bg-[#0B211B] border border-[#24473A] flex items-center justify-center text-[#B7C8C1] hover:text-white cursor-pointer"
         >
           <X className="w-4 h-4" />
         </button>
 
-        <div className="w-12 h-12 rounded-2xl bg-[#00B887]/20 border border-[#00B887]/40 flex items-center justify-center text-[#F4C95D] mb-3">
+        <div className="w-12 h-12 rounded-2xl bg-[#00B887]/20 border border-[#00B887]/40 flex items-center justify-center text-[#F4C95D] mb-2.5">
           <QrCode className="w-6 h-6" />
         </div>
 
         <h3 className="text-base font-bold text-white mb-0.5">{merchant.merchantName}</h3>
-        <p className="text-xs text-[#B7C8C1] mb-4">
+        <p className="text-xs text-[#B7C8C1] mb-3">
           {merchant.provider} • {merchant.merchantType}
         </p>
 
-        {/* High-Contrast QR Code Card */}
-        <div className="p-4 bg-white rounded-2xl shadow-lg border-2 border-[#F4C95D] mb-4 flex flex-col items-center justify-center">
-          {/* Simulated precise QR Matrix Pattern */}
-          <div className="w-48 h-48 bg-white flex flex-col items-center justify-center relative p-2">
-            <svg
-              viewBox="0 0 100 100"
-              className="w-full h-full text-black fill-current"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              {/* Corner position squares */}
-              <rect x="5" y="5" width="28" height="28" fill="black" rx="3" />
-              <rect x="9" y="9" width="20" height="20" fill="white" rx="2" />
-              <rect x="13" y="13" width="12" height="12" fill="black" rx="1" />
+        {/* QR Encoding Mode Switcher */}
+        <div className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-[#0B211B] border border-[#24473A] w-full mb-3 text-[11px]">
+          <button
+            type="button"
+            onClick={() => setQrMode('number')}
+            className={`py-1.5 rounded-lg font-bold transition-colors cursor-pointer ${
+              qrMode === 'number'
+                ? 'bg-[#00B887] text-[#03120E]'
+                : 'text-[#B7C8C1] hover:text-white'
+            }`}
+          >
+            Namba ya Till Pekee
+          </button>
+          <button
+            type="button"
+            onClick={() => setQrMode('details')}
+            className={`py-1.5 rounded-lg font-bold transition-colors cursor-pointer ${
+              qrMode === 'details'
+                ? 'bg-[#00B887] text-[#03120E]'
+                : 'text-[#B7C8C1] hover:text-white'
+            }`}
+          >
+            Taarifa Kamili (JSON)
+          </button>
+        </div>
 
-              <rect x="67" y="5" width="28" height="28" fill="black" rx="3" />
-              <rect x="71" y="9" width="20" height="20" fill="white" rx="2" />
-              <rect x="75" y="13" width="12" height="12" fill="black" rx="1" />
-
-              <rect x="5" y="67" width="28" height="28" fill="black" rx="3" />
-              <rect x="9" y="71" width="20" height="20" fill="white" rx="2" />
-              <rect x="13" y="75" width="12" height="12" fill="black" rx="1" />
-
-              {/* Data blocks */}
-              <rect x="38" y="8" width="6" height="6" />
-              <rect x="48" y="12" width="6" height="6" />
-              <rect x="56" y="8" width="6" height="6" />
-              <rect x="38" y="24" width="6" height="6" />
-              <rect x="48" y="20" width="6" height="6" />
-
-              <rect x="8" y="38" width="6" height="6" />
-              <rect x="20" y="42" width="6" height="6" />
-              <rect x="12" y="52" width="6" height="6" />
-
-              <rect x="38" y="38" width="10" height="10" />
-              <rect x="52" y="42" width="8" height="8" />
-              <rect x="42" y="54" width="12" height="6" />
-
-              <rect x="68" y="38" width="8" height="8" />
-              <rect x="80" y="46" width="12" height="6" />
-              <rect x="72" y="56" width="6" height="8" />
-
-              <rect x="40" y="72" width="6" height="6" />
-              <rect x="52" y="78" width="8" height="6" />
-              <rect x="64" y="70" width="6" height="10" />
-              <rect x="76" y="80" width="12" height="6" />
-
-              {/* Center Brand Badge */}
-              <circle cx="50" cy="50" r="10" fill="white" stroke="#06271D" strokeWidth="2" />
-              <text
-                x="50"
-                y="54"
-                textAnchor="middle"
-                fontSize="8"
-                fontWeight="900"
-                fill="#00B887"
-              >
-                99
-              </text>
-            </svg>
+        {/* Real Generated High-Contrast QR Code Card */}
+        <div className="p-4 bg-white rounded-2xl shadow-lg border-2 border-[#F4C95D] mb-3.5 flex flex-col items-center justify-center">
+          <div className="w-48 h-48 bg-white flex items-center justify-center relative">
+            {qrDataUrl ? (
+              <img
+                src={qrDataUrl}
+                alt={`QR Code ya ${merchant.merchantName} (${merchant.number})`}
+                className="w-48 h-48 object-contain"
+              />
+            ) : (
+              <span className="text-xs text-gray-500">
+                {qrError || 'Inatengeneza QR Code...'}
+              </span>
+            )}
           </div>
 
           <div className="mt-2 text-center">
@@ -113,34 +175,44 @@ export const QrCodeModal: React.FC<QrCodeModalProps> = ({ merchant, isOpen, onCl
           </div>
         </div>
 
-        <p className="text-xs text-[#B7C8C1] mb-4">
-          Scan kwa kutumia App yoyote ya Benki au Pochi ya Simu (M-Pesa, Tigo Pesa, Selcom, NMB/CRDB).
+        <p className="text-xs text-[#B7C8C1] mb-3.5">
+          QR halisi imetengenezwa kwa ajili ya <strong>{merchant.number}</strong>. Scan kwa kamera au App ya malipo.
         </p>
 
-        <div className="w-full flex items-center gap-2">
+        <div className="w-full grid grid-cols-3 gap-2">
           <button
             type="button"
             onClick={handleCopy}
-            className="flex-1 py-2.5 px-3 rounded-xl bg-[#00B887] text-[#03120E] text-xs font-bold flex items-center justify-center gap-2 hover:brightness-110 active:scale-[0.98] transition-all cursor-pointer"
+            className="py-2.5 px-2 rounded-xl bg-[#00B887] text-[#03120E] text-xs font-bold flex items-center justify-center gap-1.5 hover:brightness-110 active:scale-[0.98] transition-all cursor-pointer"
           >
             {copied ? (
               <>
-                <Check className="w-4 h-4 stroke-[2.5]" />
-                <span>Imenakiliwa!</span>
+                <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                <span>Nakili ✓</span>
               </>
             ) : (
               <>
-                <Copy className="w-4 h-4" />
-                <span>Nakili Namba</span>
+                <Copy className="w-3.5 h-3.5" />
+                <span>Nakili</span>
               </>
             )}
           </button>
           <button
             type="button"
-            onClick={onClose}
-            className="py-2.5 px-4 rounded-xl bg-[#0B211B] border border-[#24473A] text-xs font-semibold text-[#B7C8C1] hover:text-white transition-colors cursor-pointer"
+            onClick={handleDownloadQr}
+            disabled={!qrDataUrl}
+            className="py-2.5 px-2 rounded-xl bg-[#0B211B] border border-[#24473A] hover:border-[#F4C95D] text-xs font-semibold text-[#F4C95D] flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-40"
           >
-            Funga
+            <Download className="w-3.5 h-3.5" />
+            <span>Pakua</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleShare}
+            className="py-2.5 px-2 rounded-xl bg-[#0B211B] border border-[#24473A] hover:border-[#00B887] text-xs font-semibold text-white flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+          >
+            <Share2 className="w-3.5 h-3.5 text-[#00B887]" />
+            <span>Shiriki</span>
           </button>
         </div>
       </div>

@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { X, Store, Check, Plus, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, Store, Plus, AlertCircle, Check } from 'lucide-react';
 import { LipaMerchantItem } from '../../data/walletData';
 import { Language, TRANSLATIONS } from '../../i18n/translations';
 
@@ -7,6 +7,8 @@ interface AddLipaNambaModalProps {
   isOpen: boolean;
   onClose: () => void;
   onAdd: (item: LipaMerchantItem) => void;
+  onUpdate?: (item: LipaMerchantItem) => void;
+  editingMerchant?: LipaMerchantItem | null;
   lang: Language;
 }
 
@@ -14,6 +16,8 @@ export const AddLipaNambaModal: React.FC<AddLipaNambaModalProps> = ({
   isOpen,
   onClose,
   onAdd,
+  onUpdate,
+  editingMerchant = null,
   lang,
 }) => {
   const t = TRANSLATIONS[lang];
@@ -25,6 +29,27 @@ export const AddLipaNambaModal: React.FC<AddLipaNambaModalProps> = ({
   const [merchantType, setMerchantType] = useState<LipaMerchantItem['merchantType']>('Till');
   const [branchOrNotes, setBranchOrNotes] = useState('');
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (isOpen) {
+      if (editingMerchant) {
+        setMerchantName(editingMerchant.merchantName);
+        setNumber(editingMerchant.number);
+        setProvider(editingMerchant.provider);
+        setCategory(editingMerchant.category);
+        setMerchantType(editingMerchant.merchantType);
+        setBranchOrNotes(editingMerchant.branchOrNotes || '');
+      } else {
+        setMerchantName('');
+        setNumber('');
+        setProvider('Vodacom M-Pesa');
+        setCategory('Mafuta');
+        setMerchantType('Till');
+        setBranchOrNotes('');
+      }
+      setError('');
+    }
+  }, [isOpen, editingMerchant]);
 
   if (!isOpen) return null;
 
@@ -40,7 +65,6 @@ export const AddLipaNambaModal: React.FC<AddLipaNambaModalProps> = ({
       return;
     }
 
-    // Build USSD Prefix
     let prefix = `*150*00*1*${cleanNumber}#`;
     if (provider === 'Tigo Pesa') {
       prefix = `*150*01*4*${cleanNumber}#`;
@@ -48,8 +72,8 @@ export const AddLipaNambaModal: React.FC<AddLipaNambaModalProps> = ({
       prefix = `*150*60*5*${cleanNumber}#`;
     }
 
-    const newItem: LipaMerchantItem = {
-      id: `lipa-${Date.now()}`,
+    const savedItem: LipaMerchantItem = {
+      id: editingMerchant ? editingMerchant.id : `lipa-${Date.now()}`,
       merchantName: merchantName.trim(),
       merchantType,
       number: cleanNumber,
@@ -57,15 +81,22 @@ export const AddLipaNambaModal: React.FC<AddLipaNambaModalProps> = ({
       category,
       branchOrNotes: branchOrNotes.trim() || undefined,
       ussdPrefix: prefix,
-      favorite: true,
+      favorite: editingMerchant ? editingMerchant.favorite : true,
     };
 
-    onAdd(newItem);
+    if (editingMerchant && onUpdate) {
+      onUpdate(savedItem);
+    } else {
+      onAdd(savedItem);
+    }
     onClose();
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200"
+      onClick={onClose}
+    >
       <div
         className="w-full max-w-md bg-[#06271D] border border-[#24473A] rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
         onClick={(e) => e.stopPropagation()}
@@ -75,12 +106,18 @@ export const AddLipaNambaModal: React.FC<AddLipaNambaModalProps> = ({
             <div className="w-8 h-8 rounded-xl bg-[#00B887]/20 border border-[#00B887]/40 flex items-center justify-center text-[#F4C95D]">
               <Store className="w-4 h-4" />
             </div>
-            <h3 className="text-sm font-bold text-white">{t.addNewLipa}</h3>
+            <h3 className="text-sm font-bold text-white">
+              {editingMerchant
+                ? lang === 'sw'
+                  ? 'Hariri Lipa Namba'
+                  : 'Edit Lipa Namba'
+                : t.addNewLipa}
+            </h3>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="w-8 h-8 rounded-full bg-[#0B211B] border border-[#24473A] flex items-center justify-center text-[#B7C8C1] hover:text-white"
+            className="w-8 h-8 rounded-full bg-[#0B211B] border border-[#24473A] flex items-center justify-center text-[#B7C8C1] hover:text-white cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -106,27 +143,45 @@ export const AddLipaNambaModal: React.FC<AddLipaNambaModalProps> = ({
                 setMerchantName(e.target.value);
                 setError('');
               }}
-              placeholder="Mf. Puma Mwenge au Duka la Dawa Mikocheni"
+              placeholder={lang === 'sw' ? 'Andika jina la duka au biashara' : 'Enter shop or business name'}
               className="w-full bg-[#0B211B] border border-[#24473A] rounded-xl px-3.5 py-2.5 text-white focus:outline-none focus:border-[#00B887]"
             />
           </div>
 
-          <div>
-            <label className="block text-[#B7C8C1] font-semibold mb-1">
-              {t.tillNumber} *
-            </label>
-            <input
-              type="text"
-              required
-              inputMode="numeric"
-              value={number}
-              onChange={(e) => {
-                setNumber(e.target.value.replace(/\D/g, ''));
-                setError('');
-              }}
-              placeholder="Mf. 5239108 au 891204"
-              className="w-full bg-[#0B211B] border border-[#24473A] rounded-xl px-3.5 py-2.5 text-white font-mono text-base font-bold focus:outline-none focus:border-[#00B887]"
-            />
+          <div className="grid grid-cols-3 gap-2.5">
+            <div className="col-span-2">
+              <label className="block text-[#B7C8C1] font-semibold mb-1">
+                {t.tillNumber} *
+              </label>
+              <input
+                type="text"
+                required
+                inputMode="numeric"
+                value={number}
+                onChange={(e) => {
+                  setNumber(e.target.value.replace(/\D/g, ''));
+                  setError('');
+                }}
+                placeholder={lang === 'sw' ? 'Namba ya Till / Paybill' : 'Till / Paybill #'}
+                className="w-full bg-[#0B211B] border border-[#24473A] rounded-xl px-3.5 py-2.5 text-white font-mono text-base font-bold focus:outline-none focus:border-[#00B887]"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[#B7C8C1] font-semibold mb-1">
+                {lang === 'sw' ? 'Aina' : 'Type'}
+              </label>
+              <select
+                value={merchantType}
+                onChange={(e) => setMerchantType(e.target.value as LipaMerchantItem['merchantType'])}
+                className="w-full bg-[#0B211B] border border-[#24473A] rounded-xl px-2.5 py-3 text-white focus:outline-none focus:border-[#00B887]"
+              >
+                <option value="Till">Till</option>
+                <option value="Paybill">Paybill</option>
+                <option value="Masterpass">Masterpass</option>
+                <option value="Government">GePG</option>
+              </select>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -174,7 +229,7 @@ export const AddLipaNambaModal: React.FC<AddLipaNambaModalProps> = ({
               type="text"
               value={branchOrNotes}
               onChange={(e) => setBranchOrNotes(e.target.value)}
-              placeholder="Mf. Karibu na ITV au Counter ya Pembeni"
+              placeholder="Mf. Tawi au maelezo mafupi"
               className="w-full bg-[#0B211B] border border-[#24473A] rounded-xl px-3.5 py-2.5 text-white focus:outline-none focus:border-[#00B887]"
             />
           </div>
@@ -184,13 +239,22 @@ export const AddLipaNambaModal: React.FC<AddLipaNambaModalProps> = ({
               type="submit"
               className="flex-1 py-2.5 rounded-xl bg-[#00B887] text-[#03120E] font-bold text-xs flex items-center justify-center gap-2 hover:brightness-110 cursor-pointer"
             >
-              <Plus className="w-4 h-4 stroke-[3]" />
-              <span>Hifadhi Lipa Namba</span>
+              {editingMerchant ? (
+                <>
+                  <Check className="w-4 h-4 stroke-[3]" />
+                  <span>{lang === 'sw' ? 'Hifadhi Mabadiliko' : 'Save Changes'}</span>
+                </>
+              ) : (
+                <>
+                  <Plus className="w-4 h-4 stroke-[3]" />
+                  <span>Hifadhi Lipa Namba</span>
+                </>
+              )}
             </button>
             <button
               type="button"
               onClick={onClose}
-              className="py-2.5 px-4 rounded-xl bg-[#0B211B] border border-[#24473A] text-xs text-[#B7C8C1]"
+              className="py-2.5 px-4 rounded-xl bg-[#0B211B] border border-[#24473A] text-xs text-[#B7C8C1] cursor-pointer"
             >
               Ghairi
             </button>

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   ShieldCheck,
@@ -7,8 +7,13 @@ import {
   LogOut,
   HardDrive,
   ChevronRight,
+  UserPen,
+  Check,
+  KeyRound,
 } from 'lucide-react';
 import { Language, TRANSLATIONS } from '../../i18n/translations';
+import { UserProfile } from '../../data/walletData';
+import { getProfileInitials } from '../../utils/vaultSecurity';
 
 interface NavigationDrawerProps {
   isOpen: boolean;
@@ -22,6 +27,10 @@ interface NavigationDrawerProps {
   bankCardsCount: number;
   mobileWalletsCount: number;
   identitiesCount: number;
+  userProfile: UserProfile;
+  onUpdateProfile: (profile: UserProfile) => void;
+  hasVaultPin: boolean;
+  firebaseUserEmail?: string | null;
 }
 
 export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
@@ -36,10 +45,40 @@ export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
   bankCardsCount,
   mobileWalletsCount,
   identitiesCount,
+  userProfile,
+  onUpdateProfile,
+  hasVaultPin,
+  firebaseUserEmail = null,
 }) => {
   const t = TRANSLATIONS[lang];
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [nameInput, setNameInput] = useState(userProfile.fullName);
+  const [phoneInput, setPhoneInput] = useState(userProfile.phoneNumber || '');
+
+  useEffect(() => {
+    if (isOpen) {
+      setNameInput(userProfile.fullName);
+      setPhoneInput(userProfile.phoneNumber || '');
+      setIsEditingProfile(false);
+    }
+  }, [isOpen, userProfile]);
 
   if (!isOpen) return null;
+
+  const initials = getProfileInitials(userProfile.fullName);
+  const displayName =
+    userProfile.fullName.trim() ||
+    (lang === 'sw' ? 'Mtumiaji wa 99Pay' : '99Pay Vault Owner');
+
+  const handleSaveProfile = (e: React.FormEvent) => {
+    e.preventDefault();
+    onUpdateProfile({
+      ...userProfile,
+      fullName: nameInput.trim(),
+      phoneNumber: phoneInput.trim(),
+    });
+    setIsEditingProfile(false);
+  };
 
   return (
     <div
@@ -76,26 +115,88 @@ export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
             </button>
           </div>
 
-          {/* User Info */}
-          <div className="flex items-center gap-3 pt-1">
-            <div className="w-12 h-12 rounded-2xl bg-[#00B887]/20 border border-[#00B887]/50 flex items-center justify-center text-[#F4C95D] font-black text-base shadow-inner">
-              JB
+          {/* Real User Profile Info / Editor */}
+          {!isEditingProfile ? (
+            <div className="flex items-center justify-between gap-2 pt-1">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-12 h-12 rounded-2xl bg-[#00B887]/20 border border-[#00B887]/50 flex items-center justify-center text-[#F4C95D] font-black text-base shadow-inner shrink-0">
+                  {initials}
+                </div>
+                <div className="min-w-0">
+                  <h3 className="font-bold text-sm text-white truncate">
+                    {displayName}
+                  </h3>
+                  <p className="text-[11px] text-[#00B887] flex items-center gap-1 font-medium">
+                    <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+                    <span className="truncate">
+                      {userProfile.phoneNumber?.trim()
+                        ? userProfile.phoneNumber
+                        : hasVaultPin
+                        ? lang === 'sw'
+                          ? 'PIN Imelindwa'
+                          : 'PIN Protected'
+                        : lang === 'sw'
+                        ? 'Weka Wasifu & PIN'
+                        : 'Set Profile & PIN'}
+                    </span>
+                  </p>
+                  <span className="text-[10px] text-[#B7C8C1] block mt-0.5 truncate">
+                    {lang === 'sw'
+                      ? `Kadi: ${bankCardsCount + mobileWalletsCount} | Hati: ${identitiesCount}`
+                      : `Cards: ${bankCardsCount + mobileWalletsCount} | Docs: ${identitiesCount}`}
+                  </span>
+                  {firebaseUserEmail && (
+                    <span className="text-[10px] text-[#00B887] font-semibold block truncate mt-0.5">
+                      ☁ {firebaseUserEmail}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsEditingProfile(true)}
+                aria-label="Edit user profile"
+                title={lang === 'sw' ? 'Hariri Wasifu' : 'Edit Profile'}
+                className="p-2 rounded-xl bg-[#0B211B] border border-[#24473A] hover:border-[#00B887] text-[#F4C95D] cursor-pointer shrink-0"
+              >
+                <UserPen className="w-4 h-4" />
+              </button>
             </div>
-            <div className="min-w-0">
-              <h3 className="font-bold text-sm text-white truncate">
-                Joseph B. Mlay
-              </h3>
-              <p className="text-[11px] text-[#00B887] flex items-center gap-1 font-medium">
-                <ShieldCheck className="w-3.5 h-3.5" />
-                <span>{lang === 'sw' ? 'Vault Imethibitishwa' : 'Vault Verified'}</span>
-              </p>
-              <span className="text-[10px] text-[#B7C8C1] block mt-0.5">
-                {lang === 'sw'
-                  ? `Kadi: ${bankCardsCount + mobileWalletsCount} | Hati: ${identitiesCount}`
-                  : `Cards: ${bankCardsCount + mobileWalletsCount} | Docs: ${identitiesCount}`}
-              </span>
-            </div>
-          </div>
+          ) : (
+            <form onSubmit={handleSaveProfile} className="space-y-2 pt-1">
+              <input
+                type="text"
+                value={nameInput}
+                onChange={(e) => setNameInput(e.target.value)}
+                placeholder={lang === 'sw' ? 'Jina lako kamili' : 'Your full name'}
+                className="w-full h-9 px-3 rounded-xl bg-[#0B211B] border border-[#24473A] text-xs text-white focus:outline-none focus:border-[#00B887]"
+              />
+              <input
+                type="tel"
+                value={phoneInput}
+                onChange={(e) => setPhoneInput(e.target.value)}
+                placeholder={lang === 'sw' ? 'Namba ya simu (hiari)' : 'Phone number (optional)'}
+                className="w-full h-9 px-3 rounded-xl bg-[#0B211B] border border-[#24473A] text-xs text-white font-mono focus:outline-none focus:border-[#00B887]"
+              />
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="submit"
+                  className="flex-1 py-1.5 rounded-xl bg-[#00B887] text-[#03120E] font-bold text-xs flex items-center justify-center gap-1 cursor-pointer"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>{lang === 'sw' ? 'Hifadhi' : 'Save'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsEditingProfile(false)}
+                  className="py-1.5 px-3 rounded-xl bg-[#0B211B] border border-[#24473A] text-xs text-[#B7C8C1] cursor-pointer"
+                >
+                  {lang === 'sw' ? 'Ghairi' : 'Cancel'}
+                </button>
+              </div>
+            </form>
+          )}
         </div>
 
         {/* Navigation Items (Settings, Security, Language, Backup) */}
@@ -124,7 +225,7 @@ export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
               </div>
             </div>
             <span className="px-2 py-0.5 rounded-lg bg-[#06271D] border border-[#F4C95D]/40 text-[#F4C95D] text-[11px] font-bold">
-              {lang === 'sw' ? '🇹🇿 SW' : '🇬🇧 EN'}
+              {lang === 'sw' ? 'TZ SW' : 'EN'}
             </span>
           </button>
 
@@ -145,8 +246,15 @@ export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
                 <span className="text-xs font-bold text-white block">
                   {t.securityCenter}
                 </span>
-                <span className="text-[10px] text-[#00B887]">
-                  FLAG_SECURE &amp; Audit Logs
+                <span className="text-[10px] text-[#00B887] flex items-center gap-1">
+                  <KeyRound className="w-2.5 h-2.5" />
+                  <span>
+                    {hasVaultPin
+                      ? 'PIN, FLAG_SECURE & Logs'
+                      : lang === 'sw'
+                      ? 'Weka PIN ya Vault & Usalama'
+                      : 'Set Vault PIN & Security'}
+                  </span>
                 </span>
               </div>
             </div>
@@ -171,7 +279,7 @@ export const NavigationDrawer: React.FC<NavigationDrawerProps> = ({
                   {t.vaultBackup}
                 </span>
                 <span className="text-[10px] text-[#B7C8C1]">
-                  Faili la .99pay (AES-256)
+                  {lang === 'sw' ? 'Faili la .99pay (Offline)' : '.99pay Offline File'}
                 </span>
               </div>
             </div>

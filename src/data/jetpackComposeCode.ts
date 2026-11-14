@@ -55,7 +55,7 @@ fun DashboardScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(text = "Habari, Joseph", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                Text(text = "Karibu, 99Pay", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                 IconButton(onClick = onSignOut) {
                     Icon(Icons.Outlined.Lock, contentDescription = "Lock", tint = ErrorRed)
                 }
@@ -69,7 +69,7 @@ fun DashboardScreen(
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(text = "99Pay Secure Vault", color = TextSecondary, fontSize = 12.sp)
-                    Text(text = "8 Documents & Cards", color = TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Black)
+                    Text(text = "Personal Vault", color = TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Black)
                 }
             }
 
@@ -259,7 +259,7 @@ fun SignInScreen(
   {
     name: "SignInViewModel.kt",
     path: "com/nineninepay/wallet/ui/signin/SignInViewModel.kt",
-    description: "MVVM ViewModel handling UI state, field validation, and Phase 1 state transitions",
+    description: "MVVM ViewModel handling UI state and field validation",
     code: `package com.nineninepay.wallet.ui.signin
 
 import androidx.lifecycle.ViewModel
@@ -327,12 +327,12 @@ class SignInViewModel : ViewModel() {
             return
         }
 
-        // Phase 1: Inputs validated. No fake authentication or synthetic login.
+        // Local input validation passed
         _uiState.update {
             it.copy(
                 identifierError = null,
                 passwordError = null,
-                infoMessage = "Phase 1 Preview: Form validated successfully. Backend authentication and secure credential handling will be connected in a later phase."
+                infoMessage = "Form validated locally. Connect an authentication provider to enable cloud sign-in."
             )
         }
     }
@@ -595,7 +595,7 @@ fun ForgotPasswordScreen(
             Text("Send Recovery Instructions")
         }
 
-        // Real infrastructure check: BLOCKED BY EXTERNAL REQUIREMENT if provider unconfigured
+        // Connect authentication provider before enabling remote recovery
     }
 }`
   },
@@ -625,7 +625,7 @@ import com.nineninepay.wallet.ui.theme.*
 fun TariffCalculatorScreen(
     onDismiss: () -> Unit = {}
 ) {
-    var amountText by remember { mutableStateOf("50000") }
+    var amountText by remember { mutableStateOf("") }
 
     Column(
         modifier = Modifier

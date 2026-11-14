@@ -3,30 +3,48 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { SignInScreen } from './components/SignInScreen';
 import { RegisterScreen } from './components/RegisterScreen';
 import { ForgotPasswordScreen } from './components/ForgotPasswordScreen';
 import { DashboardScreen } from './components/DashboardScreen';
-import { CodeInspectorModal } from './components/CodeInspectorModal';
+import { onAuthStateChanged, signOut, User } from 'firebase/auth';
+import { auth } from './lib/firebase';
 import {
   Smartphone,
   Maximize2,
-  Code2,
-  Info,
   CreditCard,
-  FileText,
-  ShieldCheck,
   Keyboard,
   UserPlus,
   LogIn,
   KeyRound,
-  CheckCircle2,
-  ServerOff,
 } from 'lucide-react';
 
+const CodeInspectorModal = lazy(() =>
+  import('./components/CodeInspectorModal').then((m) => ({ default: m.CodeInspectorModal }))
+);
+
 export default function App() {
+  const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
   const [currentScreen, setCurrentScreen] = useState<'signin' | 'register' | 'forgot_password' | 'dashboard'>('dashboard');
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setFirebaseUser(user);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleSignOut = async () => {
+    try {
+      if (auth.currentUser) {
+        await signOut(auth);
+      }
+    } catch {
+      // ignore sign-out error on offline webviews
+    }
+    setCurrentScreen('signin');
+  };
   const [deviceMode, setDeviceMode] = useState<'device' | 'fullscreen'>(() => {
     if (typeof window !== 'undefined') {
       const isCapacitorNative = Boolean((window as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.());
@@ -38,7 +56,6 @@ export default function App() {
   });
   const [heightPreset, setHeightPreset] = useState<'standard' | 'compact' | 'keyboard'>('standard');
   const [isCodeModalOpen, setIsCodeModalOpen] = useState(false);
-  const [showProjectSpecs, setShowProjectSpecs] = useState(false);
 
   const isNativeApp =
     typeof window !== 'undefined' &&
@@ -62,7 +79,7 @@ export default function App() {
     return (
       <div className="h-screen w-full bg-[#03120E] text-white flex flex-col font-sans overflow-hidden">
         {currentScreen === 'dashboard' && (
-          <DashboardScreen onSignOut={() => setCurrentScreen('signin')} />
+          <DashboardScreen firebaseUser={firebaseUser} onSignOut={handleSignOut} />
         )}
         {currentScreen === 'signin' && (
           <SignInScreen
@@ -72,7 +89,10 @@ export default function App() {
           />
         )}
         {currentScreen === 'register' && (
-          <RegisterScreen onNavigateToSignIn={() => setCurrentScreen('signin')} />
+          <RegisterScreen
+            onNavigateToSignIn={() => setCurrentScreen('signin')}
+            onNavigateToDashboard={() => setCurrentScreen('dashboard')}
+          />
         )}
         {currentScreen === 'forgot_password' && (
           <ForgotPasswordScreen onNavigateToSignIn={() => setCurrentScreen('signin')} />
@@ -203,31 +223,6 @@ export default function App() {
             </div>
           )}
 
-          {/* Engineering Policy & Status toggle */}
-          <button
-            type="button"
-            onClick={() => setShowProjectSpecs((prev) => !prev)}
-            className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
-              showProjectSpecs
-                ? 'bg-[#00B887]/20 text-[#00B887] border border-[#00B887]/40'
-                : 'bg-[#0B211B] text-[#B7C8C1] hover:text-white border border-[#24473A]'
-            }`}
-          >
-            <Info className="w-3.5 h-3.5" />
-            <span>Engineering Status</span>
-          </button>
-
-          {/* Jetpack Compose Kotlin Code Inspector */}
-          <button
-            type="button"
-            onClick={() => setIsCodeModalOpen(true)}
-            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#0B211B] hover:bg-[#06271D] text-[#F4C95D] border border-[#24473A] hover:border-[#F4C95D]/40 transition-all cursor-pointer shadow-sm"
-          >
-            <Code2 className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Kotlin Compose (.kt)</span>
-            <span className="sm:hidden">Kotlin</span>
-          </button>
-
           {/* Viewport Frame Mode Switcher */}
           <div className="flex items-center bg-[#0B211B] p-0.5 rounded-lg border border-[#24473A]">
             <button
@@ -238,7 +233,7 @@ export default function App() {
                   ? 'bg-[#00B887] text-[#03120E] font-bold'
                   : 'text-[#B7C8C1] hover:text-white'
               }`}
-              title="Android Phone Mockup (Google Pixel 8 Pro)"
+              title="Mobile Device Frame"
             >
               <Smartphone className="w-3.5 h-3.5" />
               <span className="hidden md:inline">Phone Frame</span>
@@ -260,59 +255,6 @@ export default function App() {
         </div>
       </header>
 
-      {/* Engineering Policy & Verifiable Status Drawer */}
-      {showProjectSpecs && (
-        <div className="w-full bg-[#06271D] border-b border-[#24473A] px-4 py-3 text-xs text-[#B7C8C1] animate-in slide-in-from-top-2 duration-200">
-          <div className="max-w-5xl mx-auto space-y-2.5">
-            <div className="flex items-center justify-between border-b border-[#24473A] pb-1.5">
-              <span className="font-bold text-white uppercase tracking-wider text-[11px] flex items-center gap-1.5">
-                <ShieldCheck className="w-4 h-4 text-[#00B887]" />
-                99Pay — Strict Real Implementation Policy &amp; Status Register
-              </span>
-              <span className="text-[10px] text-[#F4C95D] font-mono">BoT Aligned · Non-Custodial Card Organizer</span>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div className="p-2.5 rounded-xl bg-[#0B211B] border border-[#24473A]">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="font-semibold text-white">Local Form Validation</span>
-                  <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-[#00B887]/20 text-[#00B887] border border-[#00B887]/40">
-                    IMPLEMENTED AND VERIFIED
-                  </span>
-                </div>
-                <p className="text-[11px] leading-relaxed text-[#B7C8C1]">
-                  Sign In, Register &amp; Forgot Password input validation passes in browser (empty fields, Tanzania phone format, email regex, 8+ char password &amp; match checks).
-                </p>
-              </div>
-
-              <div className="p-2.5 rounded-xl bg-[#0B211B] border border-[#24473A]">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="font-semibold text-white">Live Auth Provider</span>
-                  <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-[#F4C95D]/20 text-[#F4C95D] border border-[#F4C95D]/40">
-                    BLOCKED BY EXTERNAL REQUIREMENT
-                  </span>
-                </div>
-                <p className="text-[11px] leading-relaxed text-[#B7C8C1]">
-                  Neither Firebase Auth nor SMS Gateway is provisioned yet. No fake accounts, fake recovery emails, or simulated OTPs are permitted.
-                </p>
-              </div>
-
-              <div className="p-2.5 rounded-xl bg-[#0B211B] border border-[#24473A]">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="font-semibold text-white">Biometric Keystore</span>
-                  <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-white/10 text-[#B7C8C1] border border-white/20">
-                    NOT IMPLEMENTED (PHASE 3)
-                  </span>
-                </div>
-                <p className="text-[11px] leading-relaxed text-[#B7C8C1]">
-                  Hardware-backed Android BiometricPrompt and Keystore will be integrated once user accounts are wired to persistent secure storage.
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Main Stage: Android Screen Container */}
       <main className="flex-1 w-full flex items-center justify-center p-0 sm:p-4 md:p-6 overflow-hidden">
         {deviceMode === 'device' ? (
@@ -330,7 +272,7 @@ export default function App() {
             {/* Screen Glass Surface */}
             <div className="w-full h-full rounded-[34px] overflow-hidden bg-[#03120E] relative flex flex-col">
               {currentScreen === 'dashboard' && (
-                <DashboardScreen onSignOut={() => setCurrentScreen('signin')} />
+                <DashboardScreen firebaseUser={firebaseUser} onSignOut={handleSignOut} />
               )}
               {currentScreen === 'signin' && (
                 <SignInScreen
@@ -340,7 +282,10 @@ export default function App() {
                 />
               )}
               {currentScreen === 'register' && (
-                <RegisterScreen onNavigateToSignIn={() => setCurrentScreen('signin')} />
+                <RegisterScreen
+                  onNavigateToSignIn={() => setCurrentScreen('signin')}
+                  onNavigateToDashboard={() => setCurrentScreen('dashboard')}
+                />
               )}
               {currentScreen === 'forgot_password' && (
                 <ForgotPasswordScreen onNavigateToSignIn={() => setCurrentScreen('signin')} />
@@ -351,7 +296,7 @@ export default function App() {
           /* Fullscreen Mobile Viewport Mode (Edge-to-Edge) */
           <div className="w-full h-full max-w-md mx-auto bg-[#03120E] shadow-2xl flex flex-col border-x border-[#24473A]/40">
             {currentScreen === 'dashboard' && (
-              <DashboardScreen onSignOut={() => setCurrentScreen('signin')} />
+              <DashboardScreen firebaseUser={firebaseUser} onSignOut={handleSignOut} />
             )}
             {currentScreen === 'signin' && (
               <SignInScreen
@@ -361,7 +306,10 @@ export default function App() {
               />
             )}
             {currentScreen === 'register' && (
-              <RegisterScreen onNavigateToSignIn={() => setCurrentScreen('signin')} />
+              <RegisterScreen
+                onNavigateToSignIn={() => setCurrentScreen('signin')}
+                onNavigateToDashboard={() => setCurrentScreen('dashboard')}
+              />
             )}
             {currentScreen === 'forgot_password' && (
               <ForgotPasswordScreen onNavigateToSignIn={() => setCurrentScreen('signin')} />
@@ -370,11 +318,15 @@ export default function App() {
         )}
       </main>
 
-      {/* Kotlin Jetpack Compose Code Inspector Modal */}
-      <CodeInspectorModal
-        isOpen={isCodeModalOpen}
-        onClose={() => setIsCodeModalOpen(false)}
-      />
+      {/* Lazy-loaded Kotlin Jetpack Compose Code Inspector Modal */}
+      {isCodeModalOpen && (
+        <Suspense fallback={null}>
+          <CodeInspectorModal
+            isOpen={isCodeModalOpen}
+            onClose={() => setIsCodeModalOpen(false)}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

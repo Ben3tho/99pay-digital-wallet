@@ -10,6 +10,8 @@ interface AnimatedLipaStackProps {
   onOpenQr: (item: LipaMerchantItem) => void;
   onCopy: (text: string, label: string) => void;
   onToggleFavorite: (id: string) => void;
+  onEditMerchant?: (item: LipaMerchantItem) => void;
+  onDeleteMerchant?: (id: string) => void;
   onOpenAddLipaModal: () => void;
 }
 
@@ -19,6 +21,8 @@ export const AnimatedLipaStack: React.FC<AnimatedLipaStackProps> = ({
   onOpenQr,
   onCopy,
   onToggleFavorite,
+  onEditMerchant,
+  onDeleteMerchant,
   onOpenAddLipaModal,
 }) => {
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -30,8 +34,8 @@ export const AnimatedLipaStack: React.FC<AnimatedLipaStackProps> = ({
         <Store className="w-8 h-8 text-[#B7C8C1]/40 mx-auto" />
         <p className="text-xs text-[#B7C8C1]">
           {lang === 'sw'
-            ? 'Hakuna Lipa Namba inayolingana na utafutaji wako.'
-            : 'No merchant found matching your search.'}
+            ? 'Bado hujaongeza Lipa Namba au Till yoyote.'
+            : 'No Lipa Namba or Till saved yet.'}
         </p>
         <button
           type="button"
@@ -139,6 +143,8 @@ export const AnimatedLipaStack: React.FC<AnimatedLipaStackProps> = ({
                   onOpenQr={onOpenQr}
                   onCopy={onCopy}
                   onToggleFavorite={onToggleFavorite}
+                  onEdit={onEditMerchant}
+                  onDelete={onDeleteMerchant}
                 />
               </div>
             );
@@ -160,6 +166,8 @@ export const AnimatedLipaStack: React.FC<AnimatedLipaStackProps> = ({
                 onOpenQr={onOpenQr}
                 onCopy={onCopy}
                 onToggleFavorite={onToggleFavorite}
+                onEdit={onEditMerchant}
+                onDelete={onDeleteMerchant}
               />
             </div>
           ))}

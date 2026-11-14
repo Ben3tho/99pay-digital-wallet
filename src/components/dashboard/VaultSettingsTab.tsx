@@ -1,12 +1,8 @@
 import React, { useState } from 'react';
 import {
   ShieldCheck,
-  FileText,
-  HeartPulse,
-  Award,
   HardDrive,
   Download,
-  Upload,
   Lock,
   LogOut,
   Trash2,
@@ -15,25 +11,30 @@ import {
   ShieldAlert,
   ChevronRight,
   Plus,
-  Eye,
-  CheckCircle2,
-  AlertTriangle,
+  UserPen,
+  Check,
 } from 'lucide-react';
-import { IdentityDocItem, InsuranceDocItem, PensionLoyaltyItem } from '../../data/walletData';
-import { IdentityCard } from './IdentityCard';
+import {
+  IdentityDocItem,
+  InsuranceDocItem,
+  PensionLoyaltyItem,
+  UserProfile,
+} from '../../data/walletData';
 import { AnimatedIdentityStack } from './AnimatedIdentityStack';
 import { InsuranceCard } from './InsuranceCard';
 import { PensionLoyaltyCard } from './PensionLoyaltyCard';
-import { AuditLogEntry } from './SecurityCenterModal';
 import { Language, TRANSLATIONS } from '../../i18n/translations';
+import { getProfileInitials } from '../../utils/vaultSecurity';
 
 interface VaultSettingsTabProps {
+  userProfile: UserProfile;
+  onUpdateProfile: (profile: UserProfile) => void;
   identities: IdentityDocItem[];
   insuranceDocs: InsuranceDocItem[];
   pensionCards: PensionLoyaltyItem[];
   lang: Language;
   onToggleLang: () => void;
-  onOpenAddModal: () => void;
+  onOpenAddModal: (tab?: 'id' | 'insurance' | 'pension') => void;
   onOpenBackupModal: () => void;
   onOpenSecurityModal: () => void;
   onLockVaultNow: () => void;
@@ -42,6 +43,8 @@ interface VaultSettingsTabProps {
   copyToClipboard: (text: string, label: string) => void;
   onViewIdentityDetail: (item: IdentityDocItem) => void;
   onViewInsuranceDetail: (item: InsuranceDocItem) => void;
+  onEditPensionCard?: (item: PensionLoyaltyItem) => void;
+  onDeletePensionCard: (id: string) => void;
   autoLockSeconds: number;
   onChangeAutoLock: (sec: number) => void;
   isFlagSecureEnabled: boolean;
@@ -51,6 +54,8 @@ interface VaultSettingsTabProps {
 }
 
 export const VaultSettingsTab: React.FC<VaultSettingsTabProps> = ({
+  userProfile,
+  onUpdateProfile,
   identities,
   insuranceDocs,
   pensionCards,
@@ -65,6 +70,8 @@ export const VaultSettingsTab: React.FC<VaultSettingsTabProps> = ({
   copyToClipboard,
   onViewIdentityDetail,
   onViewInsuranceDetail,
+  onEditPensionCard,
+  onDeletePensionCard,
   autoLockSeconds,
   onChangeAutoLock,
   isFlagSecureEnabled,
@@ -74,36 +81,118 @@ export const VaultSettingsTab: React.FC<VaultSettingsTabProps> = ({
 }) => {
   const t = TRANSLATIONS[lang];
   const [showWipeConfirm, setShowWipeConfirm] = useState(false);
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [editName, setEditName] = useState(userProfile.fullName);
+  const [editPhone, setEditPhone] = useState(userProfile.phoneNumber || '');
 
-  // Sub-navigation filter within Settings/Vault for IDs vs Settings
-  const [activeSubSection, setActiveSubSection] = useState<'documents' | 'security' | 'system'>('documents');
+  const [activeSubSection, setActiveSubSection] = useState<'documents' | 'security' | 'system'>(
+    'documents'
+  );
+
+  const initials = getProfileInitials(userProfile.fullName);
+  const displayName =
+    userProfile.fullName.trim() ||
+    (lang === 'sw' ? 'Mtumiaji wa 99Pay' : '99Pay Vault Owner');
+
+  const handleSaveProfile = (e: React.FormEvent) => {
+    e.preventDefault();
+    onUpdateProfile({
+      ...userProfile,
+      fullName: editName.trim(),
+      phoneNumber: editPhone.trim(),
+    });
+    setIsEditingProfile(false);
+  };
 
   return (
     <div className="w-full flex flex-col space-y-4 pb-6">
       {/* Vault Profile Header Card */}
-      <div className="p-4 rounded-2xl bg-gradient-to-br from-[#06271D] via-[#0B211B] to-[#041712] border border-[#24473A] shadow-md flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-11 h-11 rounded-2xl bg-[#00B887]/20 border border-[#00B887]/40 flex items-center justify-center text-[#F4C95D] font-black text-lg">
-            JM
-          </div>
-          <div>
-            <h2 className="text-base font-bold text-white leading-tight">Joseph B. Mlay</h2>
-            <div className="flex items-center gap-1.5 mt-0.5">
-              <span className="w-2 h-2 rounded-full bg-[#00B887]" />
-              <span className="text-xs text-[#00B887] font-semibold">Vault Imehakikiwa</span>
-              <span className="text-xs text-[#B7C8C1]">· +255 744 ***</span>
+      <div className="p-4 rounded-2xl bg-gradient-to-br from-[#06271D] via-[#0B211B] to-[#041712] border border-[#24473A] shadow-md">
+        {!isEditingProfile ? (
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-11 h-11 rounded-2xl bg-[#00B887]/20 border border-[#00B887]/40 flex items-center justify-center text-[#F4C95D] font-black text-lg shrink-0">
+                {initials}
+              </div>
+              <div className="min-w-0">
+                <h2 className="text-base font-bold text-white leading-tight truncate">
+                  {displayName}
+                </h2>
+                <div className="flex items-center gap-1.5 mt-0.5 truncate">
+                  <span className="w-2 h-2 rounded-full bg-[#00B887] shrink-0" />
+                  <span className="text-xs text-[#00B887] font-semibold truncate">
+                    {lang === 'sw' ? 'Vault Binafsi' : 'Personal Vault'}
+                  </span>
+                  {userProfile.phoneNumber?.trim() && (
+                    <span className="text-xs text-[#B7C8C1] truncate">
+                      · {userProfile.phoneNumber}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setEditName(userProfile.fullName);
+                  setEditPhone(userProfile.phoneNumber || '');
+                  setIsEditingProfile(true);
+                }}
+                aria-label="Edit profile"
+                className="p-2 rounded-xl bg-[#03120E] border border-[#24473A] hover:border-[#00B887] text-[#B7C8C1] hover:text-white transition-colors cursor-pointer"
+                title={lang === 'sw' ? 'Hariri Wasifu' : 'Edit Profile'}
+              >
+                <UserPen className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={onLockVaultNow}
+                aria-label="Lock vault now"
+                className="p-2 rounded-xl bg-[#03120E] border border-[#24473A] hover:border-[#F4C95D] text-[#F4C95D] transition-colors cursor-pointer active:scale-95"
+                title={lang === 'sw' ? 'Funga Vault Mara Moja' : 'Lock Vault Now'}
+              >
+                <Lock className="w-4 h-4" />
+              </button>
             </div>
           </div>
-        </div>
-
-        <button
-          type="button"
-          onClick={onLockVaultNow}
-          className="p-2 rounded-xl bg-[#03120E] border border-[#24473A] hover:border-[#F4C95D] text-[#F4C95D] transition-colors cursor-pointer active:scale-95"
-          title="Funga Vault Mara Moja"
-        >
-          <Lock className="w-4 h-4" />
-        </button>
+        ) : (
+          <form onSubmit={handleSaveProfile} className="space-y-2.5">
+            <div className="grid grid-cols-1 gap-2">
+              <input
+                type="text"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                placeholder={lang === 'sw' ? 'Jina lako kamili' : 'Your full name'}
+                className="w-full h-10 px-3 rounded-xl bg-[#03120E] border border-[#24473A] text-xs text-white focus:outline-none focus:border-[#00B887]"
+              />
+              <input
+                type="tel"
+                value={editPhone}
+                onChange={(e) => setEditPhone(e.target.value)}
+                placeholder={lang === 'sw' ? 'Namba ya simu (hiari)' : 'Phone number (optional)'}
+                className="w-full h-10 px-3 rounded-xl bg-[#03120E] border border-[#24473A] text-xs text-white font-mono focus:outline-none focus:border-[#00B887]"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="submit"
+                className="flex-1 py-2 rounded-xl bg-[#00B887] text-[#03120E] font-bold text-xs flex items-center justify-center gap-1 cursor-pointer"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>{lang === 'sw' ? 'Hifadhi Wasifu' : 'Save Profile'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsEditingProfile(false)}
+                className="py-2 px-3 rounded-xl bg-[#03120E] border border-[#24473A] text-xs text-[#B7C8C1] cursor-pointer"
+              >
+                {lang === 'sw' ? 'Ghairi' : 'Cancel'}
+              </button>
+            </div>
+          </form>
+        )}
       </div>
 
       {/* Sub-section Switcher Pills */}
@@ -117,7 +206,8 @@ export const VaultSettingsTab: React.FC<VaultSettingsTabProps> = ({
               : 'text-[#B7C8C1] hover:text-white'
           }`}
         >
-          {lang === 'sw' ? 'Nyaraka & Hati' : 'Documents'} ({identities.length + insuranceDocs.length + pensionCards.length})
+          {lang === 'sw' ? 'Nyaraka & Hati' : 'Documents'} (
+          {identities.length + insuranceDocs.length + pensionCards.length})
         </button>
 
         <button
@@ -148,14 +238,13 @@ export const VaultSettingsTab: React.FC<VaultSettingsTabProps> = ({
       {/* ===================== VIEW 1: NYARAKA NA HATI ===================== */}
       {activeSubSection === 'documents' && (
         <div className="space-y-4">
-          {/* Action Row */}
           <div className="flex items-center justify-between px-1">
             <span className="text-xs font-bold text-[#B7C8C1] uppercase tracking-wider">
               {lang === 'sw' ? 'Vitambulisho & Hati Rasmi' : 'Official IDs & Documents'}
             </span>
             <button
               type="button"
-              onClick={onOpenAddModal}
+              onClick={() => onOpenAddModal('id')}
               className="flex items-center gap-1 text-xs text-[#00B887] hover:text-[#F4C95D] font-bold cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5 stroke-[3]" />
@@ -163,7 +252,6 @@ export const VaultSettingsTab: React.FC<VaultSettingsTabProps> = ({
             </button>
           </div>
 
-          {/* 1. National IDs with 3D Stack / Scroll Animation */}
           <AnimatedIdentityStack
             identities={identities}
             lang={lang}
@@ -172,31 +260,67 @@ export const VaultSettingsTab: React.FC<VaultSettingsTabProps> = ({
 
           {/* 2. Health Insurance (NHIF / Jubilee) */}
           <div className="pt-2 space-y-2.5">
-            <span className="text-xs font-bold text-[#B7C8C1] uppercase tracking-wider block px-1">
-              {lang === 'sw' ? 'Bima ya Afya' : 'Health Insurance'}
-            </span>
-            {insuranceDocs.map((item) => (
-              <InsuranceCard
-                key={item.id}
-                item={item}
-                onClick={() => onViewInsuranceDetail(item)}
-              />
-            ))}
+            <div className="flex items-center justify-between px-1">
+              <span className="text-xs font-bold text-[#B7C8C1] uppercase tracking-wider">
+                {lang === 'sw' ? 'Bima ya Afya' : 'Health Insurance'}
+              </span>
+              <button
+                type="button"
+                onClick={() => onOpenAddModal('insurance')}
+                className="text-[11px] font-bold text-[#00B887] hover:text-[#F4C95D] cursor-pointer"
+              >
+                + {lang === 'sw' ? 'Ongeza Bima' : 'Add Insurance'}
+              </button>
+            </div>
+            {insuranceDocs.length === 0 ? (
+              <div className="p-5 rounded-2xl bg-[#06271D]/40 border border-dashed border-[#24473A] text-center text-xs text-[#B7C8C1]">
+                {lang === 'sw'
+                  ? 'Hakuna kadi ya bima ya afya iliyohifadhiwa.'
+                  : 'No health insurance card saved yet.'}
+              </div>
+            ) : (
+              insuranceDocs.map((item) => (
+                <InsuranceCard
+                  key={item.id}
+                  item={item}
+                  onClick={() => onViewInsuranceDetail(item)}
+                />
+              ))
+            )}
           </div>
 
           {/* 3. Pension & Loyalty Cards */}
           <div className="pt-2 space-y-2.5">
-            <span className="text-xs font-bold text-[#B7C8C1] uppercase tracking-wider block px-1">
-              {lang === 'sw' ? 'Mifuko ya Hifadhi ya Jamii & Mafao' : 'Pension & Loyalty Cards'}
-            </span>
-            {pensionCards.map((item) => (
-              <PensionLoyaltyCard
-                key={item.id}
-                item={item}
-                lang={lang}
-                onCopy={copyToClipboard}
-              />
-            ))}
+            <div className="flex items-center justify-between px-1">
+              <span className="text-xs font-bold text-[#B7C8C1] uppercase tracking-wider">
+                {lang === 'sw' ? 'Mifuko ya Hifadhi & Uanachama' : 'Pension & Loyalty Cards'}
+              </span>
+              <button
+                type="button"
+                onClick={() => onOpenAddModal('pension')}
+                className="text-[11px] font-bold text-[#00B887] hover:text-[#F4C95D] cursor-pointer"
+              >
+                + {lang === 'sw' ? 'Ongeza' : 'Add'}
+              </button>
+            </div>
+            {pensionCards.length === 0 ? (
+              <div className="p-5 rounded-2xl bg-[#06271D]/40 border border-dashed border-[#24473A] text-center text-xs text-[#B7C8C1]">
+                {lang === 'sw'
+                  ? 'Hakuna kadi ya NSSF, PSSSF au uanachama iliyohifadhiwa.'
+                  : 'No NSSF, PSSSF, or loyalty cards saved yet.'}
+              </div>
+            ) : (
+              pensionCards.map((item) => (
+                <PensionLoyaltyCard
+                  key={item.id}
+                  item={item}
+                  lang={lang}
+                  onCopy={copyToClipboard}
+                  onEdit={onEditPensionCard}
+                  onDelete={onDeletePensionCard}
+                />
+              ))
+            )}
           </div>
         </div>
       )}
@@ -204,7 +328,6 @@ export const VaultSettingsTab: React.FC<VaultSettingsTabProps> = ({
       {/* ===================== VIEW 2: USALAMA & NAKALA ===================== */}
       {activeSubSection === 'security' && (
         <div className="space-y-3.5">
-          {/* Backup & Export Direct Banner */}
           <div className="p-4 rounded-2xl bg-[#06271D] border border-[#24473A] space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-blue-400 font-bold text-sm">
@@ -217,8 +340,8 @@ export const VaultSettingsTab: React.FC<VaultSettingsTabProps> = ({
             </div>
             <p className="text-xs text-[#B7C8C1]">
               {lang === 'sw'
-                ? 'Hifadhi kadi na vitambulisho vyako kwenye faili la usalama lililofungwa kwa AES-256. Unaweza kulirejesha kwenye simu yoyote bila intaneti.'
-                : 'Safely backup all cards and IDs into an encrypted .99pay file for offline recovery.'}
+                ? 'Hifadhi kadi na vitambulisho vyako kwenye faili la nakala. Unaweza kulirejesha kwenye simu yoyote bila intaneti.'
+                : 'Safely backup all cards and IDs into a .99pay file for offline recovery.'}
             </p>
             <button
               type="button"
@@ -230,7 +353,6 @@ export const VaultSettingsTab: React.FC<VaultSettingsTabProps> = ({
             </button>
           </div>
 
-          {/* Android FLAG_SECURE Controller */}
           <div className="p-3.5 rounded-2xl bg-[#06271D] border border-[#24473A] flex items-center justify-between">
             <div className="pr-3">
               <div className="flex items-center gap-1.5 text-sm font-bold text-white">
@@ -254,7 +376,6 @@ export const VaultSettingsTab: React.FC<VaultSettingsTabProps> = ({
             </button>
           </div>
 
-          {/* Biometrics Toggle */}
           <div className="p-3.5 rounded-2xl bg-[#06271D] border border-[#24473A] flex items-center justify-between">
             <div className="pr-3">
               <div className="flex items-center gap-1.5 text-sm font-bold text-white">
@@ -278,7 +399,6 @@ export const VaultSettingsTab: React.FC<VaultSettingsTabProps> = ({
             </button>
           </div>
 
-          {/* Auto-Lock Duration */}
           <div className="p-3.5 rounded-2xl bg-[#06271D] border border-[#24473A] space-y-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5 text-sm font-bold text-white">
@@ -307,7 +427,6 @@ export const VaultSettingsTab: React.FC<VaultSettingsTabProps> = ({
             </div>
           </div>
 
-          {/* Full Security Hub Modal Opener */}
           <button
             type="button"
             onClick={onOpenSecurityModal}
@@ -315,7 +434,11 @@ export const VaultSettingsTab: React.FC<VaultSettingsTabProps> = ({
           >
             <div className="flex items-center gap-2 text-purple-400">
               <ShieldCheck className="w-4 h-4" />
-              <span>{lang === 'sw' ? 'Kumbukumbu za Usalama (Audit Logs)' : 'View Security Audit Logs'}</span>
+              <span>
+                {lang === 'sw'
+                  ? 'Kituo cha Usalama & PIN / Audit Logs'
+                  : 'Security Hub, Vault PIN & Audit Logs'}
+              </span>
             </div>
             <ChevronRight className="w-4 h-4 text-[#B7C8C1]" />
           </button>
@@ -325,7 +448,6 @@ export const VaultSettingsTab: React.FC<VaultSettingsTabProps> = ({
       {/* ===================== VIEW 3: MIPANGILIO YA MFUMO ===================== */}
       {activeSubSection === 'system' && (
         <div className="space-y-3.5">
-          {/* Language Switcher */}
           <div className="p-3.5 rounded-2xl bg-[#06271D] border border-[#24473A] flex items-center justify-between">
             <div className="flex items-center gap-2 text-white text-sm font-bold">
               <Globe className="w-4 h-4 text-[#00B887]" />
@@ -336,11 +458,10 @@ export const VaultSettingsTab: React.FC<VaultSettingsTabProps> = ({
               onClick={onToggleLang}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#0B211B] border border-[#00B887]/50 text-xs font-bold text-[#F4C95D] cursor-pointer hover:border-[#F4C95D] transition-colors"
             >
-              <span>{lang === 'sw' ? '🇹🇿 Kiswahili' : '🇬🇧 English'}</span>
+              <span>{lang === 'sw' ? 'TZ Kiswahili' : 'EN English'}</span>
             </button>
           </div>
 
-          {/* Lock Vault Now Button */}
           <button
             type="button"
             onClick={onLockVaultNow}
@@ -355,7 +476,6 @@ export const VaultSettingsTab: React.FC<VaultSettingsTabProps> = ({
             <span className="text-[11px] text-[#B7C8C1]">Instant Lock</span>
           </button>
 
-          {/* Sign Out Button */}
           <button
             type="button"
             onClick={onSignOut}
@@ -370,22 +490,25 @@ export const VaultSettingsTab: React.FC<VaultSettingsTabProps> = ({
             <ChevronRight className="w-4 h-4 text-[#B7C8C1]" />
           </button>
 
-          {/* Emergency Wipe Section */}
           <div className="p-4 rounded-2xl bg-rose-950/20 border border-rose-800/40 space-y-2.5">
             <div className="flex items-center gap-2 text-rose-400 font-bold text-sm">
               <ShieldAlert className="w-4 h-4" />
-              <span>{lang === 'sw' ? 'Futa Data Zote (Emergency Wipe)' : 'Emergency Data Wipe'}</span>
+              <span>
+                {lang === 'sw' ? 'Futa Data Zote (Emergency Wipe)' : 'Emergency Data Wipe'}
+              </span>
             </div>
             <p className="text-xs text-rose-200/80">
               {lang === 'sw'
                 ? 'Hufuta kabisa kadi, vitambulisho, na tills zote kwenye kumbukumbu ya simu hii mara moja iwapo kuna hatari.'
-                : 'Instantly purges all cards, IDs, and records from local hardware storage in case of emergency.'}
+                : 'Instantly purges all cards, IDs, and records from local storage in case of emergency.'}
             </p>
 
             {showWipeConfirm ? (
               <div className="space-y-2 pt-1">
                 <span className="text-xs font-bold text-white block">
-                  {lang === 'sw' ? 'Una uhakika unataka kufuta kila kitu sasa?' : 'Are you sure you want to permanently wipe?'}
+                  {lang === 'sw'
+                    ? 'Una uhakika unataka kufuta kila kitu sasa?'
+                    : 'Are you sure you want to permanently wipe?'}
                 </span>
                 <div className="flex items-center gap-2">
                   <button
